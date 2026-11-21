@@ -1,0 +1,325 @@
+{
+  "format": "quantgrid.engine-golden/1",
+  "engine_version": "pairs_zscore/1",
+  "recorded_with": {
+    "python": "3.12.3",
+    "numpy": "2.5.5",
+    "machine": "x86_64",
+    "system": "Linux"
+  },
+  "regenerate": "QG_REGEN_GOLDEN=1 .venv/bin/pytest tests/unit/test_engine.py -k golden",
+  "cases": [
+    {
+      "id": "small-baseline",
+      "spec": {
+        "schema_version": 1,
+        "dataset": {
+          "name": "pairs-ou-small-v1",
+          "sha256": "a2bb5c213282516c1ba31a93ed158fe2da1921bc71d5973d41c11824e47ee339"
+        },
+        "strategy": {
+          "name": "pairs_zscore",
+          "version": "1"
+        },
+        "params": {
+          "lookback": 30,
+          "entry_z": 2.0,
+          "exit_z": 0.5
+        },
+        "split": {
+          "mode": "fraction",
+          "train_fraction": 0.6,
+          "train_end": null,
+          "test_start": null,
+          "embargo_bars": 0
+        },
+        "fees": {
+          "commission_bps": 1.0,
+          "slippage_bps": 0.5
+        },
+        "seed": 11,
+        "workload": {
+          "bootstrap_samples": 0,
+          "bootstrap_block": 20
+        },
+        "faults": null,
+        "result_schema_version": 1
+      },
+      "spec_hash": "68ef21b3ad0000b944c73e0c5fa7291946fd5ed896187fbb853d6b338df50d59",
+      "metrics": {
+        "total_return": 0.3152840262636869,
+        "ann_return": 0.13328688096962238,
+        "ann_vol": 0.08132094592075795,
+        "sharpe": 1.579432286467925,
+        "sortino": 2.5470064095551788,
+        "max_drawdown": 0.038782523071372976,
+        "turnover": 46,
+        "n_trades": 23,
+        "exposure": 0.26,
+        "fees_paid": 0.0069,
+        "hit_rate": 0.8695652173913043,
+        "avg_holding_bars": 9.043478260869565,
+        "hedge_ratio": 0.7912006603452586,
+        "alpha": 0.18892347597844772,
+        "n_train_bars": 1200,
+        "n_test_bars": 800,
+        "periods_per_year": 365.25,
+        "sharpe_ci_low": null,
+        "sharpe_ci_high": null,
+        "sharpe_boot_mean": null,
+        "p_sharpe_le_0": null,
+        "bootstrap_samples": 0
+      },
+      "series_sha256": "fb235f5f111a21f13fa5fca9311fdfe65e66851d71b35454953f0d5e5fa03099",
+      "diagnostics": {
+        "engine_version": "pairs_zscore/1",
+        "strategy": "pairs_zscore@1",
+        "dataset": "pairs-ou-small-v1",
+        "dataset_sha256": "a2bb5c213282516c1ba31a93ed158fe2da1921bc71d5973d41c11824e47ee339",
+        "n_bars": 2000,
+        "train_end_index": 1200,
+        "test_start_index": 1200,
+        "test_start_ts_ns": 1523750400000000000,
+        "test_end_ts_ns": 1592784000000000000,
+        "first_zscore_index": 1200,
+        "rolling_recomputed_windows": 0,
+        "bootstrap_block": 20
+      }
+    },
+    {
+      "id": "medium-bootstrap",
+      "spec": {
+        "schema_version": 1,
+        "dataset": {
+          "name": "pairs-ou-medium-v1",
+          "sha256": "275180684b103db7aff9be0dea7ba4dc7f088708767d499854081ef34baa56ff"
+        },
+        "strategy": {
+          "name": "pairs_zscore",
+          "version": "1"
+        },
+        "params": {
+          "lookback": 48,
+          "entry_z": 1.8,
+          "exit_z": 0.3
+        },
+        "split": {
+          "mode": "fraction",
+          "train_fraction": 0.6,
+          "train_end": null,
+          "test_start": null,
+          "embargo_bars": 24
+        },
+        "fees": {
+          "commission_bps": 1.0,
+          "slippage_bps": 1.0
+        },
+        "seed": 2024,
+        "workload": {
+          "bootstrap_samples": 300,
+          "bootstrap_block": 24
+        },
+        "faults": null,
+        "result_schema_version": 1
+      },
+      "spec_hash": "b9439bc019f6e42ef1cffd1cd708da8862968e63c8b749eb655ca61f6317f1d7",
+      "metrics": {
+        "total_return": 0.4650032485943678,
+        "ann_return": 0.5214736165371168,
+        "ann_vol": 0.13289949402609882,
+        "sharpe": 3.2243764881465875,
+        "sortino": 4.770517487732603,
+        "max_drawdown": 0.053379297414202664,
+        "turnover": 418,
+        "n_trades": 209,
+        "exposure": 0.5146690070210632,
+        "fees_paid": 0.08360000000000001,
+        "hit_rate": 0.7177033492822966,
+        "avg_holding_bars": 19.641148325358852,
+        "hedge_ratio": 1.1951398406030231,
+        "alpha": -0.38098218743243617,
+        "n_train_bars": 12000,
+        "n_test_bars": 7976,
+        "periods_per_year": 8766.0,
+        "sharpe_ci_low": 1.40864406025836,
+        "sharpe_ci_high": 4.8248554883131956,
+        "sharpe_boot_mean": 3.1876171092429466,
+        "p_sharpe_le_0": 0.0,
+        "bootstrap_samples": 300
+      },
+      "series_sha256": "500e5cab185c3627a5f7a043813ab88962b08e11f1e3eac4062e3a8006fdba6b",
+      "diagnostics": {
+        "engine_version": "pairs_zscore/1",
+        "strategy": "pairs_zscore@1",
+        "dataset": "pairs-ou-medium-v1",
+        "dataset_sha256": "275180684b103db7aff9be0dea7ba4dc7f088708767d499854081ef34baa56ff",
+        "n_bars": 20000,
+        "train_end_index": 12000,
+        "test_start_index": 12024,
+        "test_start_ts_ns": 1558051200000000000,
+        "test_end_ts_ns": 1586761200000000000,
+        "first_zscore_index": 12024,
+        "rolling_recomputed_windows": 0,
+        "bootstrap_block": 24
+      }
+    },
+    {
+      "id": "large-stops",
+      "spec": {
+        "schema_version": 1,
+        "dataset": {
+          "name": "pairs-ou-large-v1",
+          "sha256": "d6d8522d45711c038eb261b58160e01214b5c67d2ab0cedb37a4238e977ecd92"
+        },
+        "strategy": {
+          "name": "pairs_zscore",
+          "version": "1"
+        },
+        "params": {
+          "lookback": 120,
+          "entry_z": 2.2,
+          "exit_z": 0.4,
+          "stop_z": 4.0,
+          "max_holding_bars": 240
+        },
+        "split": {
+          "mode": "fraction",
+          "train_fraction": 0.5,
+          "train_end": null,
+          "test_start": null,
+          "embargo_bars": 0
+        },
+        "fees": {
+          "commission_bps": 0.5,
+          "slippage_bps": 0.5
+        },
+        "seed": 7,
+        "workload": {
+          "bootstrap_samples": 0,
+          "bootstrap_block": 20
+        },
+        "faults": null,
+        "result_schema_version": 1
+      },
+      "spec_hash": "720c520551d6ffad6011f17e35c089d5282fae7f6438d8be5da995ed5f65b77f",
+      "metrics": {
+        "total_return": 0.7206502639679166,
+        "ann_return": 16.363962034178574,
+        "ann_vol": 0.26531668974263833,
+        "sharpe": 10.89113535229904,
+        "sortino": 15.730907841588623,
+        "max_drawdown": 0.05604907146098592,
+        "turnover": 1768,
+        "n_trades": 884,
+        "exposure": 0.40771,
+        "fees_paid": 0.1768,
+        "hit_rate": 0.7070135746606335,
+        "avg_holding_bars": 46.1210407239819,
+        "hedge_ratio": 0.9193910051311619,
+        "alpha": 0.21192051928326006,
+        "n_train_bars": 100000,
+        "n_test_bars": 100000,
+        "periods_per_year": 525960.0,
+        "sharpe_ci_low": null,
+        "sharpe_ci_high": null,
+        "sharpe_boot_mean": null,
+        "p_sharpe_le_0": null,
+        "bootstrap_samples": 0
+      },
+      "series_sha256": "304615c66fd841898d44f5c29416a4ea6b5b6a24425819ad79791a2012190207",
+      "diagnostics": {
+        "engine_version": "pairs_zscore/1",
+        "strategy": "pairs_zscore@1",
+        "dataset": "pairs-ou-large-v1",
+        "dataset_sha256": "d6d8522d45711c038eb261b58160e01214b5c67d2ab0cedb37a4238e977ecd92",
+        "n_bars": 200000,
+        "train_end_index": 100000,
+        "test_start_index": 100000,
+        "test_start_ts_ns": 1583836800000000000,
+        "test_end_ts_ns": 1589836740000000000,
+        "first_zscore_index": 100000,
+        "rolling_recomputed_windows": 0,
+        "bootstrap_block": 20
+      }
+    },
+    {
+      "id": "gappy-timestamp-split",
+      "spec": {
+        "schema_version": 1,
+        "dataset": {
+          "name": "pairs-ou-gappy-v1",
+          "sha256": "449f73e2cf257e2ba7c8f68476f891e06707ba6df6a88a3b552c181a6674dba8"
+        },
+        "strategy": {
+          "name": "pairs_zscore",
+          "version": "1"
+        },
+        "params": {
+          "lookback": 24,
+          "entry_z": 2.0,
+          "exit_z": 0.0,
+          "stop_z": 3.5,
+          "max_holding_bars": 48
+        },
+        "split": {
+          "mode": "timestamp",
+          "train_fraction": null,
+          "train_end": "2019-04-15T00:00:00Z",
+          "test_start": "2019-04-16T00:00:00Z",
+          "embargo_bars": 6
+        },
+        "fees": {
+          "commission_bps": 1.0,
+          "slippage_bps": 0.5
+        },
+        "seed": 99,
+        "workload": {
+          "bootstrap_samples": 200,
+          "bootstrap_block": 10
+        },
+        "faults": null,
+        "result_schema_version": 1
+      },
+      "spec_hash": "e78296bb954d58342de24fc730c3c3427426cedfc470e7e6dbc615533e405cf4",
+      "metrics": {
+        "total_return": 0.19821141863517067,
+        "ann_return": 0.9174340455531287,
+        "ann_vol": 0.19776874443949224,
+        "sharpe": 3.390603063418043,
+        "sortino": 4.999783682876069,
+        "max_drawdown": 0.05450853586817972,
+        "turnover": 160,
+        "n_trades": 80,
+        "exposure": 0.4854209445585216,
+        "fees_paid": 0.024,
+        "hit_rate": 0.6875,
+        "avg_holding_bars": 14.775,
+        "hedge_ratio": 0.753366255319212,
+        "alpha": 0.002641687053818842,
+        "n_train_bars": 2451,
+        "n_test_bars": 2435,
+        "periods_per_year": 8766.0,
+        "sharpe_ci_low": 0.29174494043572113,
+        "sharpe_ci_high": 6.828220154154647,
+        "sharpe_boot_mean": 3.436593731826844,
+        "p_sharpe_le_0": 0.02,
+        "bootstrap_samples": 200
+      },
+      "series_sha256": "c7a4d2de7d8daa792076485ba9187cd96d2628981cac257b87087ab7d4b1b82e",
+      "diagnostics": {
+        "engine_version": "pairs_zscore/1",
+        "strategy": "pairs_zscore@1",
+        "dataset": "pairs-ou-gappy-v1",
+        "dataset_sha256": "449f73e2cf257e2ba7c8f68476f891e06707ba6df6a88a3b552c181a6674dba8",
+        "n_bars": 4909,
+        "train_end_index": 2451,
+        "test_start_index": 2474,
+        "test_start_ts_ns": 1555372800000000000,
+        "test_end_ts_ns": 1564297200000000000,
+        "first_zscore_index": 2474,
+        "rolling_recomputed_windows": 0,
+        "bootstrap_block": 10
+      }
+    }
+  ]
+}

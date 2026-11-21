@@ -1,0 +1,1 @@
+"""QuantGrid results package."""

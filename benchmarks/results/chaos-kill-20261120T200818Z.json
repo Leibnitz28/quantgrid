@@ -1,0 +1,135 @@
+{
+  "run_id": "20261120T200818Z",
+  "batch_id": "6768b9a5-db1b-4d23-9704-4fe925543115",
+  "final_state": "COMPLETED",
+  "signal": "KILL",
+  "victim": "chaos-w0",
+  "victim_tasks_at_kill": [
+    "05514034-1d08-45ad-9658-b77733494518"
+  ],
+  "victim_example_task": "05514034-1d08-45ad-9658-b77733494518",
+  "stop_seconds": null,
+  "workers": 4,
+  "restart": true,
+  "elapsed_s": 16.314,
+  "lease_ttl_s": 15.0,
+  "heartbeat_interval_s": 3.0,
+  "coordinator_tick_s": 0.5,
+  "recovery": [
+    {
+      "task_id": "05514034-1d08-45ad-9658-b77733494518",
+      "attempt": 1,
+      "reclaim_s": 15.457,
+      "restart_s": 15.51,
+      "published_s": 15.614,
+      "final_state": "SUCCEEDED",
+      "final_attempts": 2
+    }
+  ],
+  "verification": {
+    "batch_id": "6768b9a5-db1b-4d23-9704-4fe925543115",
+    "batch_state": "COMPLETED",
+    "expected_tasks": 144,
+    "task_rows": 144,
+    "counts": {
+      "PENDING": 0,
+      "RUNNING": 0,
+      "RETRY_PENDING": 0,
+      "SUCCEEDED": 144,
+      "FAILED": 0,
+      "CANCELED": 0
+    },
+    "published_results": 144,
+    "attempts": 145,
+    "retry_distribution": {
+      "1": 143,
+      "2": 1
+    },
+    "lease_expirations": 1,
+    "late_completions": 0,
+    "checks": [
+      {
+        "name": "batch_spec_integrity",
+        "ok": true,
+        "detail": "stored batch spec re-hashes to spec_sha",
+        "severity": "error",
+        "examples": []
+      },
+      {
+        "name": "expected_task_set",
+        "ok": true,
+        "detail": "144 expected, 144 stored, 0 missing, 0 unexpected, 0 specs not matching their hash",
+        "severity": "error",
+        "examples": []
+      },
+      {
+        "name": "all_terminal",
+        "ok": true,
+        "detail": "every task is SUCCEEDED, FAILED or CANCELED",
+        "severity": "error",
+        "examples": []
+      },
+      {
+        "name": "one_result_per_success",
+        "ok": true,
+        "detail": "144 result rows for 144 succeeded tasks; 0 duplicated spec hashes",
+        "severity": "error",
+        "examples": []
+      },
+      {
+        "name": "artifacts_verified",
+        "ok": true,
+        "detail": "144 artifacts checked (sha256, size, decode, spec_hash, metrics)",
+        "severity": "error",
+        "examples": []
+      },
+      {
+        "name": "duckdb_cross_check",
+        "ok": true,
+        "detail": "DuckDB scanned 144 distinct artifact files",
+        "severity": "error",
+        "examples": []
+      },
+      {
+        "name": "attempt_log_consistent",
+        "ok": true,
+        "detail": "145 attempts across 144 tasks",
+        "severity": "error",
+        "examples": []
+      },
+      {
+        "name": "transitions_legal",
+        "ok": true,
+        "detail": "434 audited transitions",
+        "severity": "error",
+        "examples": []
+      },
+      {
+        "name": "retries_consistent",
+        "ok": true,
+        "detail": "144 attempts with output, 0 late (zombie) completions, 0 checksum mismatches",
+        "severity": "error",
+        "examples": []
+      },
+      {
+        "name": "orphan_artifacts",
+        "ok": true,
+        "detail": "0 stored artifact(s) not referenced by any published result (e.g. discarded after cancel); safe to garbage-collect",
+        "severity": "warning",
+        "examples": []
+      }
+    ],
+    "ok": true
+  },
+  "environment": {
+    "code_sha": "62818535135c65f342bf2501ccc8f3599b73f7777d79433aef5af42138f91091",
+    "git": {
+      "git_commit": null,
+      "git_dirty": null,
+      "source": "error"
+    },
+    "python": "3.12.3",
+    "platform": "Linux-6.18.44-fc-v726-x86_64-with-glibc2.39",
+    "cpu_count": 4
+  }
+}

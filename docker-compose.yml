@@ -1,0 +1,92 @@
+# Full local stack:  docker compose up --build --scale worker=4
+# API on http://127.0.0.1:8000 (X-API-Key: dev-key). Data persists in named volumes.
+name: quantgrid
+
+x-app-env: &app-env
+  QG_DATABASE_URL: postgresql+psycopg://quantgrid:quantgrid@postgres:5432/quantgrid
+  QG_REDIS_URL: redis://redis:6379/0
+  QG_LOG_FORMAT: json
+  QG_API_KEYS: ${QG_API_KEYS:-dev-key:dev-user}
+  QG_ALLOW_FAULT_INJECTION: ${QG_ALLOW_FAULT_INJECTION:-false}
+  QG_LLM_PROVIDER: ${QG_LLM_PROVIDER:-fake}
+
+x-app: &app
+  build:
+    context: .
+    args:
+      GIT_COMMIT: ${GIT_COMMIT:-unknown}
+  image: quantgrid:local
+  environment: *app-env
+  volumes:
+    - qg-data:/var/lib/quantgrid
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: quantgrid
+      POSTGRES_PASSWORD: quantgrid
+      POSTGRES_DB: quantgrid
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quantgrid -d quantgrid"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    <<: *app
+    command: ["migrate"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    command: ["api", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on: &app-deps
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=3).status != 200)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  coordinator:
+    <<: *app
+    command: ["coordinator"]
+    depends_on: *app-deps
+
+  worker:
+    <<: *app
+    command: ["worker"]
+    depends_on: *app-deps
+    stop_grace_period: 60s
+    deploy:
+      replicas: 2
+
+volumes:
+  pg-data: {}
+  redis-data: {}
+  qg-data: {}
