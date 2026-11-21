@@ -1,4 +1,4 @@
-# ADR 0002 — Leases with fencing tokens; at-least-once execution, at-most-once publication
+# ADR 0002: Leases with fencing tokens; at-least-once execution, at-most-once publication
 
 **Status:** accepted
 
@@ -20,8 +20,8 @@ long enough to be presumed dead and then resume.
 * All lease arithmetic uses the database clock.
 
 ## Consequences
-* Work may execute more than once (at-least-once). The *effect* — one published result
-  per task — happens at most once, and exactly once for tasks that succeed.
-* Recovery latency after a crash ≈ remaining TTL + reconcile tick + dispatch + queue wait
+* Work may execute more than once (at-least-once). The *effect*: one published result
+  per task: happens at most once, and exactly once for tasks that succeed.
+* Recovery latency after a crash ~ remaining TTL + reconcile tick + dispatch + queue wait
   (measured by `scripts/chaos_kill_worker.py`).
 * We never claim exactly-once execution.

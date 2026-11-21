@@ -2,12 +2,11 @@
 
 Invariants enforced here, independent of what the model says:
 * at most ``max_steps`` provider calls and ``max_tool_calls`` tool calls;
-* every provider call gets only the *remaining* wall-clock budget; a stuck provider is
+* every provider call gets only the remaining wall-clock budget; a stuck provider is
   abandoned (daemon thread) and the run ends with ``timeout``;
-* every tool call goes through :class:`ToolRegistry` (allowlist + strict validation);
-  rejected calls are returned to the model as errors, counted, and repeated violations
-  stop the run;
-* the model's text is returned verbatim as ``final_text`` and is never executed.
+* every tool call goes through :class:`ToolRegistry`; rejected calls are returned to the
+  model as errors and repeated violations stop the run;
+* the model's text is returned as ``final_text`` and never executed.
 """
 
 from __future__ import annotations
@@ -51,7 +50,7 @@ T = TypeVar("T")
 
 
 def redact(value: Any) -> Any:
-    """Recursively mask values under secret-looking keys and token-looking strings."""
+    """Mask values under secret-looking keys and token-looking strings."""
     if isinstance(value, dict):
         return {
             k: "[REDACTED]" if _SECRET_KEY.search(str(k)) else redact(v) for k, v in value.items()
@@ -107,7 +106,7 @@ class _Timeout(Exception):
 
 
 def _call_with_timeout(fn: Callable[[], T], timeout_s: float) -> T:
-    """Run ``fn`` in a daemon thread; raise :class:`_Timeout` if it overruns."""
+    """Run ``fn`` in a daemon thread; raise :class:`_Timeout` on overrun."""
     box: dict[str, Any] = {}
     done = threading.Event()
     ctx = contextvars.copy_context()
@@ -155,8 +154,6 @@ class AgentRunner:
             span.set_attribute("agent.steps", result.steps)
             span.set_attribute("agent.tool_calls", result.tool_calls)
             return result
-
-    # ---- internals --------------------------------------------------------------------
 
     def _run(self, system: str, user: str) -> AgentRun:
         t_start = time.monotonic()

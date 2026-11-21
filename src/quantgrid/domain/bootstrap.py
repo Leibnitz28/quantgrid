@@ -1,27 +1,7 @@
-"""Stationary block bootstrap (Politis & Romano, 1994) of the test-period Sharpe ratio.
+"""Stationary block bootstrap (Politis and Romano, 1994) of the test-period Sharpe ratio.
 
-This is the per-task CPU-bound workload. ``WorkloadSpec.bootstrap_samples`` resamples of
-the net test returns, with mean block length ``WorkloadSpec.bootstrap_block``, yield a
-confidence interval for the annualised Sharpe ratio. It is a description of sampling
-uncertainty under the stationary-bootstrap assumptions, not a claim of real-world
-profitability.
-
-Algorithm (normative; results are a pure function of the inputs):
-
-* ``rng = numpy.random.default_rng([seed, 0x5EED])``.
-* For each sample ``b = 0 .. samples-1``, IN ORDER: ``u = rng.random(n)`` and then
-  ``starts = rng.integers(0, n, size=n)``. Set ``new_block = u < 1/L`` with
-  ``new_block[0] = True``. Let ``j(t)`` be the most recent ``t' <= t`` with
-  ``new_block[t']``; then ``idx_t = (starts[j(t)] + (t - j(t))) mod n``, so blocks wrap
-  circularly. Resample ``x = returns[idx]``; its Sharpe is
-  ``mean(x)/std(x, ddof=1)*sqrt(ppy)``, or ``0.0`` if ``std <= 1e-15``.
-* ``sharpe_ci_low`` and ``sharpe_ci_high`` are
-  ``numpy.percentile(sharpes, [2.5, 97.5], method="linear")``. ``sharpe_boot_mean`` is
-  the mean of the resampled Sharpes, and ``p_sharpe_le_0`` the share that are ``<= 0``.
-
-Samples are processed in chunks of at most 64, with ``cancel.check()`` before each chunk.
-Each sample's draws are made in order whatever the chunking, and statistics are computed
-row by row, so results are bit-identical for every chunk size (tested).
+The algorithm is defined in docs/strategy.md. Results are bit-identical for every chunk
+size and depend only on the inputs and the seed.
 """
 
 from __future__ import annotations
@@ -71,7 +51,6 @@ class BootstrapResult:
 
 
 def empty_bootstrap_metrics() -> dict[str, MetricValue]:
-    """Bootstrap metric keys for a task that ran no resamples."""
     return {
         "sharpe_ci_low": None,
         "sharpe_ci_high": None,
@@ -128,7 +107,6 @@ def bootstrap_sharpes(
     cancel: CancelToken = _NULL_CANCEL,
     chunk_size: int | None = None,
 ) -> FloatArray:
-    """The resampled Sharpe ratios, in sample order (see module docstring)."""
     r = np.ascontiguousarray(returns, dtype=np.float64)
     if r.ndim != 1 or r.shape[0] < 2:
         raise ValueError("bootstrap needs a 1-D return series with at least 2 values")
@@ -173,7 +151,6 @@ def stationary_bootstrap_sharpe(
     cancel: CancelToken = _NULL_CANCEL,
     chunk_size: int | None = None,
 ) -> BootstrapResult:
-    """Summarise :func:`bootstrap_sharpes` (CI, mean, share <= 0)."""
     sharpes = bootstrap_sharpes(
         returns,
         samples=samples,

@@ -1,8 +1,4 @@
-"""QuantGrid agents: a small, read-only, policy-bounded experiment-planning layer.
-
-No tool in this package can submit, cancel, modify or delete anything; the planner only
-returns a proposed spec that a human submits and the policy service re-checks.
-"""
+"""Read-only experiment-planning agents. No tool here can submit, cancel, modify or delete."""
 
 from quantgrid.agents.explainer import Explanation, explain_batch
 from quantgrid.agents.fake_llm import FakeLLM, ScriptedLLM

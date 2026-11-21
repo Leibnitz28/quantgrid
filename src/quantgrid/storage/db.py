@@ -1,9 +1,7 @@
-"""Database engine/session helpers.
+"""Database engine and transaction helpers.
 
-All scheduler state changes run in short explicit transactions at PostgreSQL's default
-READ COMMITTED isolation, made safe by conditional ``UPDATE ... WHERE state = ...``
-statements and row locks (``SELECT ... FOR UPDATE [SKIP LOCKED]``). Lease times always
-use the *database* clock (``now()``), never a worker's clock.
+State changes run in short READ COMMITTED transactions using conditional UPDATEs and row
+locks. Lease times use the database clock (``now()``), never a worker's.
 """
 
 from __future__ import annotations
@@ -47,7 +45,7 @@ def get_engine() -> Engine:
 
 
 def dispose_engine() -> None:
-    """Dispose the cached engine (after fork, in tests, on shutdown)."""
+    """Dispose the cached engine (after fork, on shutdown, in tests)."""
     if get_engine.cache_info().currsize:
         get_engine().dispose()
         get_engine.cache_clear()
@@ -55,13 +53,13 @@ def dispose_engine() -> None:
 
 @contextmanager
 def transaction(engine: Engine | None = None) -> Iterator[Connection]:
-    """``BEGIN ... COMMIT`` (``ROLLBACK`` on exception)."""
+    """One transaction; rolls back on exception."""
     with (engine or get_engine()).begin() as conn:
         yield conn
 
 
 def set_actor(conn: Connection, actor: str, reason: str | None = None) -> None:
-    """Annotate the current transaction for the task-transition audit trigger."""
+    """Set the actor recorded by the task-transition audit trigger."""
     conn.execute(
         text(
             "SELECT set_config('quantgrid.actor', :actor, true), "
@@ -79,8 +77,7 @@ def set_reason(conn: Connection, reason: str | None) -> None:
 
 
 def notify(conn: Connection, payload: str = "tasks") -> None:
-    """Wake the coordinator (delivered on COMMIT; identical payloads are de-duplicated
-    by PostgreSQL within one transaction)."""
+    """Wake the coordinator (delivered on COMMIT; identical payloads dedupe per transaction)."""
     conn.execute(
         text("SELECT pg_notify(:channel, :payload)"),
         {"channel": NOTIFY_CHANNEL, "payload": payload},

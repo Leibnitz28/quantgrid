@@ -1,32 +1,7 @@
-"""Performance metrics of one strategy run, computed on the test segment only.
+"""Performance metrics of one run, computed on the test segment only.
 
-Every value is a finite Python ``float``/``int`` or ``None`` (undefined), never NaN or inf,
-so metrics can be stored as canonical JSON (``result_artifacts.metrics``).
-
-Definitions. ``r`` are the net returns of the test bars, ``p`` the positions, ``equity`` the
-running product of ``1 + r``, ``n = n_test`` and ``dp_i = p_i - p_{i-1}`` (with the
-position before the first test bar flat). ``c`` is the cost rate.
-
-* ``periods_per_year = 365.25*86400 / bar_interval_s``, where
-  ``bar_interval_s = median(diff(ts))/1e9`` over the test-segment timestamps. The median
-  makes it robust to missing bars.
-* ``total_return = equity_last - 1``. ``ann_return = equity_last**(ppy/n) - 1``, or
-  ``None`` if ``equity_last <= 0`` or the power overflows.
-* ``ann_vol = std(r, ddof=1)*sqrt(ppy)``. ``sharpe = mean(r)/std(r, ddof=1)*sqrt(ppy)``,
-  ``None`` if ``n < 2`` or ``std <= 1e-15``. ``sortino = mean(r)/downside*sqrt(ppy)`` with
-  ``downside = sqrt(mean(min(r, 0)^2))``, ``None`` if ``downside <= 1e-15``.
-* ``max_drawdown = max_i (1 - equity_i/running_max_i)``, where the running maximum
-  starts at 1.0. It is a non-negative fraction, and exceeds 1 only if equity goes
-  non-positive.
-* ``turnover = sum |dp|`` (int). ``n_trades`` = number of entries (0 -> +/-1).
-  ``exposure`` = share of test bars with ``p_{i-1} != 0``. ``fees_paid = sum c*|dp|``.
-* A trade enters at bar ``e`` and exits (back to flat) at bar ``x``, and its
-  ``pnl = sum(r_e .. r_x)`` (``math.fsum``), so it includes both transaction costs.
-  ``hit_rate`` = share of closed trades with ``pnl > 0`` and ``avg_holding_bars`` =
-  mean of ``x - e``. Both are ``None`` without trades. Every trade is closed, because the
-  strategy is flat on the last bar.
-* Pass-through values: ``hedge_ratio``, ``alpha``, ``n_train_bars``, ``n_test_bars`` and
-  ``periods_per_year``.
+Every value is a finite float or int, or ``None`` when undefined, so metrics can be stored
+as canonical JSON. Definitions are in docs/strategy.md.
 """
 
 from __future__ import annotations
@@ -101,7 +76,6 @@ def periods_per_year(ts: IntArray) -> float:
 
 
 def sharpe_ratio(r: FloatArray, ppy: float) -> float | None:
-    """Annualised Sharpe ratio (zero risk-free rate), ``None`` if undefined."""
     if r.shape[0] < 2:
         return None
     sd = float(np.std(r, ddof=1))
@@ -111,7 +85,6 @@ def sharpe_ratio(r: FloatArray, ppy: float) -> float | None:
 
 
 def sortino_ratio(r: FloatArray, ppy: float) -> float | None:
-    """Annualised Sortino ratio (target 0), ``None`` if there is no downside dispersion."""
     if r.shape[0] == 0:
         return None
     downside = math.sqrt(float(np.mean(np.minimum(r, 0.0) ** 2)))
@@ -121,7 +94,6 @@ def sortino_ratio(r: FloatArray, ppy: float) -> float | None:
 
 
 def max_drawdown(equity: FloatArray) -> float:
-    """Largest peak-to-trough decline as a positive fraction (running max starts at 1.0)."""
     if equity.shape[0] == 0:
         return 0.0
     running_max = np.maximum.accumulate(np.maximum(equity, 1.0))
@@ -177,7 +149,6 @@ def performance_metrics(
     alpha: float,
     n_train_bars: int,
 ) -> dict[str, MetricValue]:
-    """Metrics of a test segment from its series (see module docstring)."""
     n = int(ret.shape[0])
     if n == 0 or not (ts.shape == position.shape == ret.shape == equity.shape):
         raise ValueError("series must be non-empty and of equal length")
@@ -210,7 +181,6 @@ def performance_metrics(
 
 
 def compute_metrics(result: StrategyResult) -> dict[str, MetricValue]:
-    """Metrics of a :class:`StrategyResult` (keys = :data:`CORE_METRIC_KEYS`)."""
     return performance_metrics(
         result.ts,
         result.position,

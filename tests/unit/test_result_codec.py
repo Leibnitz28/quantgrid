@@ -95,11 +95,6 @@ def _metadata(data: bytes) -> dict[str, str]:
     return {k.decode(): v.decode() for k, v in raw.items()}
 
 
-# --------------------------------------------------------------------------------------
-# Determinism
-# --------------------------------------------------------------------------------------
-
-
 def test_encode_is_byte_identical_across_calls() -> None:
     first = encode_result(SPEC_HASH, make_output(), engine_version=ENGINE)
     second = encode_result(SPEC_HASH, make_output(), engine_version=ENGINE)
@@ -217,11 +212,6 @@ def test_artifact_bytes_depend_on_every_input() -> None:
     assert encode_result(SPEC_HASH, tweaked, engine_version=ENGINE).data != base
 
 
-# --------------------------------------------------------------------------------------
-# Round trip and metadata
-# --------------------------------------------------------------------------------------
-
-
 def test_round_trip() -> None:
     output = make_output()
     encoded = encode_result(SPEC_HASH, output, engine_version=ENGINE)
@@ -292,11 +282,6 @@ def test_empty_series_round_trip() -> None:
     assert encoded.row_count == decoded.row_count == 0
     assert decoded.table.column_names == ["ts", "pnl"]
     assert validate_artifact(encoded.data, expected_spec_hash=SPEC_HASH) == []
-
-
-# --------------------------------------------------------------------------------------
-# Input validation
-# --------------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf"), np.float64("nan")])
@@ -429,11 +414,6 @@ def test_invalid_diagnostics_are_rejected(diagnostics: dict[str, Any]) -> None:
 def test_encode_requires_task_output() -> None:
     with pytest.raises(TypeError):
         encode_result(SPEC_HASH, {"metrics": {}}, engine_version=ENGINE)  # type: ignore[arg-type]
-
-
-# --------------------------------------------------------------------------------------
-# decode_result / validate_artifact on bad input
-# --------------------------------------------------------------------------------------
 
 
 def test_validate_accepts_a_good_artifact() -> None:

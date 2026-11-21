@@ -60,11 +60,6 @@ def store(tmp_path: Path) -> LocalArtifactStore:
     return LocalArtifactStore(tmp_path / "artifacts")
 
 
-# --------------------------------------------------------------------------------------
-# stage / commit / discard
-# --------------------------------------------------------------------------------------
-
-
 def test_stage_writes_complete_temp_file(store: LocalArtifactStore) -> None:
     staged = store.stage(PAYLOAD, hint="task-1-attempt-2")
 
@@ -245,11 +240,6 @@ def test_commit_rejects_malformed_staged_digest(store: LocalArtifactStore) -> No
         store.commit(bad)
 
 
-# --------------------------------------------------------------------------------------
-# Crash between stage and commit
-# --------------------------------------------------------------------------------------
-
-
 def test_crash_between_stage_and_commit_leaves_only_temp_file(store: LocalArtifactStore) -> None:
     staged = store.stage(PAYLOAD, hint="crashed-attempt")
     # ... the worker dies here: commit never runs ...
@@ -319,11 +309,6 @@ def test_process_killed_between_stage_and_commit(store: LocalArtifactStore) -> N
     assert published.created is True
 
 
-# --------------------------------------------------------------------------------------
-# Corruption
-# --------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     "corrupt",
     [
@@ -378,10 +363,6 @@ def test_symlink_at_artifact_path_is_never_followed_and_is_replaced(
     assert store.read_bytes(uri) == PAYLOAD
     assert secret.read_bytes() == PAYLOAD  # the symlink target was not modified
 
-
-# --------------------------------------------------------------------------------------
-# URIs
-# --------------------------------------------------------------------------------------
 
 SHA = _sha(b"x")
 
@@ -443,11 +424,6 @@ def test_uri_for_rejects_malformed_digest(store: LocalArtifactStore, sha: Any) -
         store.uri_for(sha)
 
 
-# --------------------------------------------------------------------------------------
-# read_bytes / verify / exists / iter_artifacts
-# --------------------------------------------------------------------------------------
-
-
 def test_read_bytes_verify_and_exists(store: LocalArtifactStore) -> None:
     published = store.commit(store.stage(PAYLOAD, hint="t"))
     sha = published.sha256
@@ -501,11 +477,6 @@ def test_iter_artifacts_on_empty_store(store: LocalArtifactStore) -> None:
     assert list(store.iter_artifacts()) == []
 
 
-# --------------------------------------------------------------------------------------
-# Hard-link fallback, protocol, settings
-# --------------------------------------------------------------------------------------
-
-
 def test_rename_fallback_when_hard_links_are_unsupported(
     store: LocalArtifactStore, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -551,10 +522,6 @@ def test_from_settings_uses_artifact_root(tmp_path: Path) -> None:
     assert store.root == (tmp_path / "configured").resolve()
     assert "configured" in repr(store)
 
-
-# --------------------------------------------------------------------------------------
-# Concurrency: zombie worker + replacement (and worse) publishing the same result
-# --------------------------------------------------------------------------------------
 
 N_PROCESSES = 6
 PAYLOADS_PER_PROCESS = 4

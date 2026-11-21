@@ -1,14 +1,10 @@
 #!/usr/bin/env bash
-# Start/stop a local PostgreSQL + Redis for QuantGrid development WITHOUT Docker.
-#
-#   scripts/dev_services.sh start    # initdb on first run, then start both services
-#   scripts/dev_services.sh status
-#   scripts/dev_services.sh stop
-#   scripts/dev_services.sh env      # print export lines for QG_DATABASE_URL / QG_REDIS_URL
-#
-# Services listen on 127.0.0.1 only, on non-default ports so they never clobber a
-# system PostgreSQL/Redis. Local dev only: PostgreSQL uses trust auth on loopback.
-# Use docker-compose.yml for a containerised setup instead.
+# Start/stop a local PostgreSQL + Redis for development, without Docker.
+# Usage: scripts/dev_services.sh {start|stop|status|env}
+#   start   initdb on first run, then start both services
+#   env     print export lines for QG_DATABASE_URL, QG_REDIS_URL and the test equivalents
+# Listens on 127.0.0.1 only, on ports 5433 and 6380 (QG_DEV_PG_PORT, QG_DEV_REDIS_PORT).
+# PostgreSQL uses trust auth on loopback: local dev only. Data is kept in .dev/.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -33,7 +29,7 @@ find_pg_bin() {
 
 PG_BIN="$(find_pg_bin)"
 
-# PostgreSQL refuses to run as root: drop to the 'postgres' OS user when needed.
+# PostgreSQL refuses to run as root.
 as_pg() {
   if [ "$(id -u)" = "0" ]; then
     runuser -u postgres -- "$@"
@@ -65,7 +61,6 @@ EOF
   if ! pg_running; then
     as_pg "$PG_BIN/pg_ctl" -D "$PG_DATA" -l "$LOG_DIR/postgres.log" -w start >/dev/null
   fi
-  # Idempotently create the application role + databases.
   psql_admin() { psql -h 127.0.0.1 -p "$PG_PORT" -U postgres -v ON_ERROR_STOP=1 -qtA "$@"; }
   if [ "$(psql_admin -c "SELECT 1 FROM pg_roles WHERE rolname='quantgrid'")" != "1" ]; then
     psql_admin -c "CREATE ROLE quantgrid LOGIN PASSWORD 'quantgrid' CREATEDB"

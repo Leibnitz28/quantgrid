@@ -1,7 +1,6 @@
 """OpenTelemetry tracing helpers with W3C trace-context propagation.
 
-Spans are always safe to create: without :func:`init_tracing` the API's no-op/proxy
-tracer is used and ``current_trace_id()`` is ``None`` outside a recording span.
+Without :func:`init_tracing` spans are no-ops and ``current_trace_id()`` is ``None``.
 """
 
 from __future__ import annotations
@@ -19,7 +18,7 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExport
 from opentelemetry.trace import Tracer
 
 _INITIALISED = False
-_provider: TracerProvider | None = None  # set by init_tracing; tests may substitute
+_provider: TracerProvider | None = None
 
 
 def init_tracing(
@@ -27,7 +26,7 @@ def init_tracing(
     exporter: Literal["none", "console", "otlp"] = "none",
     endpoint: str | None = None,
 ) -> None:
-    """Install a global TracerProvider (once). ``"none"`` installs nothing exportable."""
+    """Install the global TracerProvider once; ``"none"`` exports nothing."""
     global _INITIALISED
     if _INITIALISED or exporter == "none":
         return
@@ -60,8 +59,7 @@ def get_tracer(name: str = "quantgrid") -> Tracer:
 
 @contextlib.contextmanager
 def span(name: str, **attributes: Any) -> Iterator[trace.Span]:
-    """Start a span as current; ``None`` attributes are dropped, others stringified if
-    they are not valid OTel attribute types. Exceptions are recorded and re-raised."""
+    """Start a current span; ``None`` attributes are dropped, invalid types stringified."""
     attrs = {
         k: (v if isinstance(v, str | bool | int | float) else str(v))
         for k, v in attributes.items()
@@ -72,7 +70,7 @@ def span(name: str, **attributes: Any) -> Iterator[trace.Span]:
 
 
 def inject_context() -> dict[str, str]:
-    """W3C ``traceparent``/``tracestate`` of the current span (empty if none)."""
+    """W3C trace-context headers of the current span (empty if none)."""
     carrier: dict[str, str] = {}
     inject(carrier)
     return carrier

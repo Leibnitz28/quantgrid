@@ -35,13 +35,13 @@ def main(argv: list[str] | None = None) -> int:
         configure_logging(level, settings.log_format, service="quantgrid-worker")
         init_tracing("quantgrid-worker", settings.otel_exporter, settings.otel_endpoint)
         start_metrics_server(settings.worker_metrics_port)
-    except ImportError:  # pragma: no cover - observability is part of the package
+    except ImportError:  # pragma: no cover
         pass
 
     from quantgrid.workers.celery_app import celery_app
     from quantgrid.workers.runtime import get_runtime
 
-    runtime = get_runtime()  # fixes the worker id before Celery starts
+    runtime = get_runtime()
     celery_app.worker_main(
         [
             "worker",

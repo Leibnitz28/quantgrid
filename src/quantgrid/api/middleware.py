@@ -19,9 +19,8 @@ _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
 
 class RequestContextMiddleware:
-    """Assigns ``request.state.request_id`` (client ``X-Request-ID`` if well-formed, else a
-    UUID), echoes it in the response, binds it to the logging context, and records
-    Prometheus HTTP metrics using the matched *route template* (bounded cardinality)."""
+    """Sets ``request.state.request_id`` (client ``X-Request-ID`` if well-formed, else a UUID),
+    echoes and logs it, and records HTTP metrics by route template (bounded cardinality)."""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -70,8 +69,7 @@ class RequestContextMiddleware:
 
 
 class BodySizeLimitMiddleware:
-    """Reject bodies larger than ``max_bytes`` with 413, whether or not the client sent
-    ``Content-Length`` (chunked bodies are counted while streaming)."""
+    """413 for bodies over ``max_bytes``; chunked bodies are counted while streaming."""
 
     def __init__(self, app: ASGIApp, max_bytes: int) -> None:
         self.app = app

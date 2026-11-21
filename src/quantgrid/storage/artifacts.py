@@ -5,37 +5,21 @@ Layout under the store root::
     tmp/<hint>.<uuid4 hex>.partial       staged bytes, not yet published
     sha256/<aa>/<sha256>.parquet         published artifacts (aa = sha256[:2])
 
-The only accepted artifact URI form is ``artifact://sha256/<aa>/<sha256>.parquet``
-(64 lowercase hex digits, ``aa`` equal to the first two). Staged files are described
-by ``artifact://tmp/<name>`` URIs, which are informational: they are recorded in
-``result_artifacts.temp_uri`` and are never resolvable through :meth:`path_for_uri`.
+The only accepted artifact URI is ``artifact://sha256/<aa>/<sha256>.parquet``. Staged files
+use informational ``artifact://tmp/<name>`` URIs that :meth:`path_for_uri` never resolves.
 
-Publishing is "temp file + atomic rename / staged object commit":
+Publishing is stage (write, hash, fsync a temp file) then commit (re-hash, no-clobber hard
+link to the content address, fsync the directory; ``os.replace`` if hard links are
+unsupported). Invariants:
 
-1. :meth:`LocalArtifactStore.stage` writes the bytes to a fresh temp file
-   (``O_CREAT | O_EXCL``), hashes them while writing, then flushes and fsyncs.
-2. :meth:`LocalArtifactStore.commit` re-hashes the temp file, checks it against the
-   staged digest and size, and publishes it at its content address with a no-clobber
-   hard link (``os.link``), then fsyncs the parent directory. If the filesystem cannot
-   hard-link, it falls back to ``os.replace``. The temp name is then removed.
-
-Invariants:
-
-* A file at ``sha256/<aa>/<sha>.parquet`` only appears by atomically linking or renaming
-  a complete, fsynced and re-verified temp file whose SHA-256 is ``<sha>``. Readers never
-  see a partially written artifact.
-* A different result can never overwrite an existing artifact, because different bytes
-  have a different address. An existing file is only replaced when it fails verification
-  (corruption), and only with a verified copy of exactly the bytes its name promises.
-* Commit is idempotent. Committing the same bytes again (another attempt, or a "zombie"
-  worker racing its replacement) returns ``created=False`` and leaves the published file
-  alone. N processes committing identical bytes concurrently all succeed, exactly one
-  file remains and no temp files are left. Where hard links are supported, exactly one
-  of them reports ``created=True``.
-* A crash between stage and commit leaves only a ``.partial`` temp file and never a
-  partial artifact. :meth:`LocalArtifactStore.gc_temp` removes such leftovers.
-* Published files and temp files are created read-only (``0o444``), as git does for its
-  object store. Reads never follow symlinks and only accept regular files.
+* A published file only appears by linking or renaming a complete, fsynced, re-verified
+  temp file, so readers never see a partial artifact.
+* Different bytes have different addresses, so a result never overwrites another. An
+  existing file is replaced only when it fails verification, and only with the exact bytes
+  its name promises.
+* Commit is idempotent, also under concurrent writers: one file remains and no temp files.
+* A crash between stage and commit leaves only a ``.partial`` file; :meth:`gc_temp`
+  removes it. Files are created read-only (0o444); reads never follow symlinks.
 """
 
 from __future__ import annotations
@@ -92,16 +76,12 @@ _UNVERIFIABLE: tuple[str, int] = ("", -1)
 
 
 class ArtifactIntegrityError(ArtifactError):
-    """Stored or staged bytes do not match the digest they are supposed to have."""
+    """Bytes do not match the digest they should have."""
 
 
 @dataclass(frozen=True, slots=True)
 class StagedArtifact:
-    """Bytes durably written to a temp file, not yet published.
-
-    ``sha256``/``size`` describe the bytes as they were written. :meth:`ArtifactStore.commit`
-    re-checks them before publishing.
-    """
+    """Bytes written to a temp file, not yet published; ``commit`` re-checks digest and size."""
 
     temp_path: Path
     temp_uri: str
@@ -113,9 +93,8 @@ class StagedArtifact:
 class PublishedArtifact:
     """Result of a commit.
 
-    ``created`` is True if this call put the bytes at ``uri``: a fresh publish, or the
-    repair of a corrupt file (``repaired=True``). It is False if a verified copy was
-    already there (idempotent duplicate).
+    ``created`` is True if this call put the bytes at ``uri`` (fresh publish or ``repaired``
+    corrupt file) and False if a verified copy was already there.
     """
 
     uri: str
@@ -127,12 +106,9 @@ class PublishedArtifact:
 
 @runtime_checkable
 class ArtifactStore(Protocol):
-    """Content-addressed artifact storage (local filesystem now, S3-compatible later).
+    """Content-addressed artifact storage; implementations keep the module invariants.
 
-    Implementations must keep the invariants in the module docstring: atomic,
-    idempotent, no-clobber publication keyed by SHA-256, and strict URI validation.
-    ``path_for_uri`` and ``iter_artifacts`` expose local paths. A remote store would
-    return local cache paths there, or raise ``NotImplementedError``.
+    ``path_for_uri`` and ``iter_artifacts`` expose local paths; a remote store may not.
     """
 
     def uri_for(self, sha256: str) -> str: ...
@@ -156,29 +132,20 @@ class ArtifactStore(Protocol):
     def iter_artifacts(self) -> Iterator[tuple[str, Path]]: ...
 
 
-# --------------------------------------------------------------------------------------
-# URIs
-# --------------------------------------------------------------------------------------
-
-
 def _preview(value: object, limit: int = 120) -> str:
     text = repr(value)
     return text if len(text) <= limit else text[:limit] + "...'"
 
 
 def artifact_uri_for(sha256: str) -> str:
-    """``artifact://sha256/<aa>/<sha256>.parquet`` for a lowercase hex SHA-256 digest."""
     if not is_sha256_hex(sha256):
         raise ValueError(f"not a lowercase hex SHA-256 digest: {_preview(sha256)}")
     return f"{URI_PREFIX}{sha256[:2]}/{sha256}{ARTIFACT_SUFFIX}"
 
 
 def sha256_from_uri(uri: str) -> str:
-    """Digest encoded in an artifact URI.
-
-    Only the exact form ``artifact://sha256/<aa>/<64 lowercase hex>.parquet`` with
-    ``aa == sha[:2]`` is accepted. Other schemes, path traversal, extra or missing
-    segments, upper case, whitespace and non-strings all raise ``ValueError``.
+    """Digest in an artifact URI. Only ``artifact://sha256/<aa>/<64 lowercase hex>.parquet`` with
+    ``aa == sha[:2]`` is accepted; anything else raises ``ValueError``.
     """
     if not isinstance(uri, str):
         raise ValueError(f"artifact URI must be a string, got {type(uri).__name__}")
@@ -192,22 +159,15 @@ def sha256_from_uri(uri: str) -> str:
 
 
 def _sanitise_hint(hint: str) -> str:
-    """A safe file-name fragment. It can never contain a separator or start with '.'/'-'."""
     cleaned = _HINT_UNSAFE_RE.sub("_", str(hint))[:_MAX_HINT_LEN].lstrip(".-")
     return cleaned or "artifact"
 
 
-# --------------------------------------------------------------------------------------
-# Low-level file helpers
-# --------------------------------------------------------------------------------------
-
-
 class _NotARegularFile(OSError):
-    """The path exists but is a symlink, directory, FIFO or other non-regular file."""
+    """A symlink, directory, FIFO or other non-regular file."""
 
 
 def _open_regular(path: Path) -> int:
-    """Open ``path`` read-only without following symlinks. Returns a regular file's fd."""
     try:
         fd = os.open(path, os.O_RDONLY | _O_NOFOLLOW | _O_NONBLOCK | _O_CLOEXEC)
     except OSError as exc:
@@ -224,7 +184,6 @@ def _open_regular(path: Path) -> int:
 
 
 def _file_digest(path: Path) -> tuple[str, int]:
-    """Streamed ``(sha256 hex, size)`` of a regular file (constant memory)."""
     fd = _open_regular(path)
     digest = hashlib.sha256()
     size = 0
@@ -241,8 +200,7 @@ def _file_digest(path: Path) -> tuple[str, int]:
 
 
 def _probe_digest(path: Path) -> tuple[str, int] | None:
-    """``(sha256, size)`` of ``path``. ``None`` if it does not exist, ``_UNVERIFIABLE`` if
-    it exists but cannot be verified (symlink, non-regular file, I/O or permission error)."""
+    """``(sha256, size)`` of ``path``; ``None`` if absent, ``_UNVERIFIABLE`` if unverifiable."""
     try:
         return _file_digest(path)
     except (FileNotFoundError, NotADirectoryError):
@@ -252,7 +210,6 @@ def _probe_digest(path: Path) -> tuple[str, int] | None:
 
 
 def _fsync_dir(path: Path) -> None:
-    """Make directory-entry changes (create/rename/link) in ``path`` durable."""
     if os.name == "nt":  # pragma: no cover - directories cannot be opened on Windows
         return
     fd = os.open(path, os.O_RDONLY | _O_DIRECTORY | _O_CLOEXEC)
@@ -266,8 +223,7 @@ def _fsync_dir(path: Path) -> None:
 
 
 def _ensure_dir(path: Path) -> None:
-    """Create ``path`` and any missing parents, fsyncing each new directory's parent.
-    Safe when several processes create the same directory at once."""
+    """Create ``path`` and missing parents, fsyncing each new directory's parent."""
     if path.is_dir():
         return
     missing: list[Path] = []
@@ -286,8 +242,7 @@ def _ensure_dir(path: Path) -> None:
 
 
 def _unlink_quietly(path: Path) -> None:
-    """Best-effort removal of a temp file. Never raises; failures are logged and left for
-    :meth:`LocalArtifactStore.gc_temp`."""
+    """Best-effort temp file removal; failures are logged and left for ``gc_temp``."""
     try:
         os.unlink(path)
     except FileNotFoundError:
@@ -296,18 +251,11 @@ def _unlink_quietly(path: Path) -> None:
         logger.warning("could not remove temp artifact file %s: %s", path, exc)
 
 
-# --------------------------------------------------------------------------------------
-# Local filesystem store
-# --------------------------------------------------------------------------------------
-
-
 class LocalArtifactStore:
     """:class:`ArtifactStore` on a local or shared POSIX filesystem.
 
-    ``root/tmp`` and ``root/sha256`` must be on the same filesystem, so that link and
-    rename are atomic. Instances hold no locks and can be shared between threads.
-    Separate processes, even on different hosts with a shared mount, can use the same
-    root at the same time.
+    ``root/tmp`` and ``root/sha256`` must share a filesystem so link and rename are atomic.
+    Instances hold no locks; separate threads and processes can share one root.
     """
 
     def __init__(self, root: Path | str) -> None:
@@ -319,8 +267,6 @@ class LocalArtifactStore:
 
     @classmethod
     def from_settings(cls, settings: Settings | None = None) -> LocalArtifactStore:
-        """Store rooted at ``QG_ARTIFACT_ROOT``. A relative path is resolved against the
-        current working directory."""
         return cls((settings or get_settings()).artifact_root)
 
     def __repr__(self) -> str:
@@ -330,27 +276,20 @@ class LocalArtifactStore:
     def root(self) -> Path:
         return self._root
 
-    # ---- addressing -------------------------------------------------------------------
-
     def uri_for(self, sha256: str) -> str:
         return artifact_uri_for(sha256)
 
     def path_for_uri(self, uri: str) -> Path:
-        """Local path of an artifact URI. Raises ``ValueError`` for anything but the exact
-        ``artifact://sha256/<aa>/<sha>.parquet`` form, so it cannot leave the store root."""
+        """Local path of an artifact URI; ``ValueError`` unless it has the exact form."""
         return self._object_path(sha256_from_uri(uri))
 
     def _object_path(self, sha256: str) -> Path:
         return self._objects_dir / sha256[:2] / f"{sha256}{ARTIFACT_SUFFIX}"
 
-    # ---- publishing -------------------------------------------------------------------
-
     def stage(self, data: bytes, *, hint: str) -> StagedArtifact:
-        """Durably write ``data`` to ``tmp/<sanitised hint>.<uuid4 hex>.partial``.
+        """Write ``data`` to ``tmp/<hint>.<uuid4 hex>.partial``, hashing while writing, then fsync.
 
-        The digest is computed while writing. The file is flushed and fsynced before
-        this returns. On failure the temp file is removed and :class:`ArtifactError`
-        is raised.
+        On failure the temp file is removed and :class:`ArtifactError` is raised.
         """
         if not isinstance(data, bytes | bytearray | memoryview):
             raise TypeError(f"artifact data must be bytes, got {type(data).__name__}")
@@ -390,16 +329,11 @@ class LocalArtifactStore:
     def commit(self, staged: StagedArtifact) -> PublishedArtifact:
         """Publish a staged artifact at its content address (atomic, idempotent).
 
-        * no artifact at the address: publish it (``created=True``);
-        * a verified copy is already there: drop the temp file (``created=False``);
-        * the existing file fails verification: atomically replace it with the verified
-          temp file and log a warning (``created=True, repaired=True``).
-
-        The temp file is re-hashed first. If it changed after staging it is deleted and
-        :class:`ArtifactIntegrityError` is raised. This catches accidental modification;
-        it cannot stop a hostile same-user process writing between the check and the
-        link. Committing the same ``staged`` again after a successful commit returns
-        ``created=False``. Raises :class:`ArtifactError` on I/O failure.
+        If the address is free, publish (``created=True``). If a verified copy exists, drop the temp
+        file (``created=False``). If the existing file fails verification, replace it with the temp
+        file and log a warning (``created=True, repaired=True``). The temp file is re-hashed first
+        and deleted with :class:`ArtifactIntegrityError` if it changed; this does not stop a hostile
+        same-user process writing between the check and the link.
         """
         self._check_staged(staged)
         sha, size = staged.sha256, staged.size
@@ -453,8 +387,7 @@ class LocalArtifactStore:
             raise ArtifactError(f"failed to publish artifact {uri}: {exc}") from exc
 
     def discard(self, staged: StagedArtifact) -> None:
-        """Remove a staged temp file (best effort, idempotent). After a commit this does
-        nothing; it never touches a published artifact."""
+        """Remove a staged temp file (idempotent). Never touches a published artifact."""
         self._check_staged(staged)
         _unlink_quietly(staged.temp_path)
 
@@ -468,12 +401,10 @@ class LocalArtifactStore:
             raise ValueError(f"malformed staged artifact: {staged!r}")
 
     def _publish_no_clobber(self, temp: Path, final: Path) -> bool:
-        """Publish ``temp`` as ``final`` if nothing is at ``final`` yet.
+        """Link ``temp`` to ``final`` if nothing is there; return False if ``final`` exists.
 
-        Returns True if published, False if ``final`` already existed (caller verifies).
-        With hard links this is an atomic put-if-absent. In the rename fallback, two
-        concurrent committers can both "win", which is harmless because both temp files
-        hold the same verified bytes.
+        With hard links this is an atomic put-if-absent. The rename fallback can let two committers
+        both win, which is harmless because both temp files hold the same verified bytes.
         """
         if self._use_hardlinks:
             try:
@@ -502,9 +433,7 @@ class LocalArtifactStore:
     def _commit_without_temp(
         self, staged: StagedArtifact, final: Path, uri: str
     ) -> PublishedArtifact:
-        """The temp file is gone: an earlier commit of ``staged`` succeeded, or the temp
-        file was discarded or garbage-collected. Succeed only if a verified copy is
-        published."""
+        """The temp file is gone; succeed only if a verified copy is published."""
         if _probe_digest(final) == (staged.sha256, staged.size):
             return PublishedArtifact(uri=uri, sha256=staged.sha256, size=staged.size, created=False)
         raise ArtifactError(
@@ -512,16 +441,10 @@ class LocalArtifactStore:
             f"garbage-collected) and no verified copy is published at {uri}"
         )
 
-    # ---- reading ----------------------------------------------------------------------
-
     def read_bytes(self, uri: str, *, verify: bool = True) -> bytes:
-        """Bytes of a published artifact.
-
-        With ``verify=True`` (the default) the content is hashed and
-        :class:`ArtifactIntegrityError` is raised if it does not match the URI, so
-        corrupt bytes are never returned. Raises ``FileNotFoundError`` if the artifact
-        does not exist, ``OSError`` if the path is a symlink or not a regular file
-        (never followed), and ``ValueError`` for an invalid URI.
+        """Bytes of a published artifact. With ``verify`` (default) corrupt content raises
+        :class:`ArtifactIntegrityError`. Raises ``FileNotFoundError``, ``OSError`` for a symlink or
+        non-regular file, ``ValueError`` for an invalid URI.
         """
         sha = sha256_from_uri(uri)
         fd = _open_regular(self._object_path(sha))
@@ -534,10 +457,7 @@ class LocalArtifactStore:
         return data
 
     def verify(self, uri: str, expected_sha: str, *, expected_size: int | None = None) -> bool:
-        """True only if ``uri`` names ``expected_sha`` and the stored bytes hash to it
-        (and have ``expected_size`` bytes, if given). False if the artifact is missing,
-        unreadable, not a regular file or corrupt. ``ValueError`` for a malformed URI or
-        digest."""
+        """True only if ``uri`` names ``expected_sha`` and the stored bytes match it (and size)."""
         sha = sha256_from_uri(uri)
         if not is_sha256_hex(expected_sha):
             raise ValueError(f"not a lowercase hex SHA-256 digest: {_preview(expected_sha)}")
@@ -549,23 +469,17 @@ class LocalArtifactStore:
         return expected_size is None or digest[1] == expected_size
 
     def exists(self, uri: str) -> bool:
-        """True if a regular file is published at ``uri``. The content is not verified."""
         path = self.path_for_uri(uri)
         try:
             return stat.S_ISREG(os.lstat(path).st_mode)
         except (FileNotFoundError, NotADirectoryError):
             return False
 
-    # ---- maintenance ------------------------------------------------------------------
-
     def gc_temp(self, older_than_s: float) -> int:
-        """Delete ``*.partial`` temp files last modified more than ``older_than_s`` seconds
-        ago. These are left behind by crashes between stage and commit. Returns the
-        number deleted.
+        """Delete ``*.partial`` files older than ``older_than_s`` seconds; return the count.
 
-        Use a threshold well above the longest stage-to-commit gap of a live worker. A
-        removed temp file makes that worker's commit fail with :class:`ArtifactError`,
-        which is retryable. It never corrupts a published artifact.
+        Use a threshold well above a live worker's stage-to-commit gap; removing its temp file
+        makes that commit fail with a retryable :class:`ArtifactError`.
         """
         if not math.isfinite(older_than_s) or older_than_s < 0:
             raise ValueError(f"older_than_s must be a finite number >= 0, got {older_than_s!r}")
@@ -597,9 +511,7 @@ class LocalArtifactStore:
     def iter_artifacts(self) -> Iterator[tuple[str, Path]]:
         """Yield ``(uri, path)`` for every published artifact, sorted by URI.
 
-        Only regular files named ``<sha>.parquet`` inside their own ``<sha[:2]>``
-        directory are listed. Stray files, symlinks and temp files are skipped. Used by
-        the verifier to find orphans (files with no ``result_artifacts`` row).
+        Strays, symlinks and temp files are skipped. The verifier uses this to find orphans.
         """
         try:
             with os.scandir(self._objects_dir) as it:

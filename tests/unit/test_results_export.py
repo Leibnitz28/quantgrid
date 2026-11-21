@@ -72,11 +72,6 @@ EXPECTED_COLUMNS = (
 )
 
 
-# --------------------------------------------------------------------------------------
-# export_metrics
-# --------------------------------------------------------------------------------------
-
-
 def test_export_parquet(tmp_path: Path) -> None:
     out = tmp_path / "metrics.parquet"
     result = export_metrics(ROWS, out, "parquet")
@@ -257,11 +252,6 @@ def test_extra_row_keys_are_ignored() -> None:
     assert metrics_table(rows).column_names == list(EXPECTED_COLUMNS)
 
 
-# --------------------------------------------------------------------------------------
-# scan_artifacts
-# --------------------------------------------------------------------------------------
-
-
 def _artifact(path: Path, spec_text: str, n: int) -> tuple[Path, str]:
     spec_hash = _h(spec_text)
     output = TaskOutput(
@@ -338,11 +328,6 @@ def test_scan_many_artifacts_in_one_query(tmp_path: Path) -> None:
     assert [s["path"] for s in scans] == paths
     assert {s["row_count"] for s in scans} == {7}
     assert {s["spec_hash"] for s in scans} == {_h("spec-template")}
-
-
-# --------------------------------------------------------------------------------------
-# summarize_metrics
-# --------------------------------------------------------------------------------------
 
 
 def test_summarize_metrics() -> None:
@@ -431,11 +416,6 @@ def test_summary_without_values() -> None:
     assert no_sharpe["mean"] is None
     missing_key = summarize_metrics(ROWS, key="does_not_exist")
     assert missing_key["n_with_value"] == 0
-
-
-# --------------------------------------------------------------------------------------
-# End to end: codec -> artifact store -> scan/validate -> export/summary
-# --------------------------------------------------------------------------------------
 
 
 def test_publish_scan_export_and_summarize(tmp_path: Path) -> None:

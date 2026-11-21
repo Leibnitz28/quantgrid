@@ -123,7 +123,6 @@ class TaskExecutor:
         self.store = store
         self.bars = BarsLRU(bars_loader or _default_bars_loader)
 
-    # ------------------------------------------------------------------------------
     def backoff_s(self, attempt: int) -> float:
         base = self.settings.retry_backoff_base_s
         return float(min(self.settings.retry_backoff_max_s, base * (2 ** max(0, attempt - 1))))
@@ -176,7 +175,6 @@ class TaskExecutor:
         finally:
             self.registry.remove(claimed.task_id)
 
-    # ------------------------------------------------------------------------------
     def _run_claimed(
         self,
         claimed: repo.ClaimedTask,
@@ -206,7 +204,7 @@ class TaskExecutor:
         token.check()
         output = run_task_spec(spec, bars, cancel=token, attempt=claimed.attempt)
         encoded = encode_result(claimed.spec_hash, output, engine_version=ENGINE_VERSION)
-        token.check()  # last cooperative check before touching storage
+        token.check()
 
         staged = self.store.stage(encoded.data, hint=f"{claimed.task_id}.{claimed.attempt}")
         try:
@@ -379,11 +377,6 @@ class TaskExecutor:
         return ExecutionResult(
             str(claimed.task_id), outcome.value, claimed.attempt, None, attempt_stats.wall_ms
         )
-
-
-# --------------------------------------------------------------------------------------
-# Thin, failure-tolerant hooks into the observability package.
-# --------------------------------------------------------------------------------------
 
 
 def _metric(name: str) -> Any:

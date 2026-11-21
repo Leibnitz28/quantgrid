@@ -1,5 +1,4 @@
-"""AI endpoints. The planner only *proposes* a spec (never enqueues); the explainer only
-reads progress through read-only tools. Deterministic policy checks decide everything."""
+"""AI endpoints. The planner only proposes a spec; the explainer only reads progress."""
 
 from __future__ import annotations
 
@@ -93,10 +92,7 @@ def plan_spec(
     ctx: Annotated[AppContext, Depends(get_ctx)],
     principal: Annotated[Principal, Depends(get_planner_principal)],
 ) -> Any:
-    """Generate a bounded, typed ExperimentBatchSpec from a natural-language goal.
-
-    The response is a *proposal*: it has passed the same policy checks as a submission,
-    but nothing is enqueued. A human reviews it and submits it to ``POST /v1/batches``."""
+    """Propose a spec from a goal. It passed policy checks but nothing is enqueued."""
     from quantgrid.agents.planner import PlannerService
 
     service = PlannerService(
@@ -148,10 +144,10 @@ def explain(
     ctx: Annotated[AppContext, Depends(get_ctx)],
     principal: Annotated[Principal, Depends(get_planner_principal)],
 ) -> ExplainResponse | JSONResponse:
-    """Read-only AI diagnosis of a batch's progress and failures."""
+    """AI diagnosis of a batch's progress and failures."""
     from quantgrid.agents.explainer import explain_batch
 
-    repo.get_batch(ctx.engine, batch_id, user_id=principal.user_id)  # 404 for other users
+    repo.get_batch(ctx.engine, batch_id, user_id=principal.user_id)
     provider = ctx.provider_factory()
     exp = explain_batch(str(batch_id), RepositoryReadModel(ctx, principal.user_id), provider)
     return ExplainResponse(

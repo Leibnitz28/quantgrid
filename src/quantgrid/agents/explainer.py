@@ -31,7 +31,7 @@ def explain_batch(
     *,
     settings: Settings | None = None,
 ) -> Explanation:
-    """Explain ``batch_id``. Never raises for model/provider failures; ``ok`` reports them."""
+    """Explain ``batch_id``; model/provider failures are reported via ``ok``, not raised."""
     s = settings or Settings()
     runner = AgentRunner(
         provider,

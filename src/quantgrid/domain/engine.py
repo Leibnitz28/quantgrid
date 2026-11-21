@@ -2,25 +2,14 @@
 
 Invariants:
 
-* Defence in depth: the content of the bars is re-hashed (a few ms even for 200k bars), so
-  a ``Bars`` object whose label was not verified against its arrays is still rejected.
-* Purity. The output is a function of ``(spec, bars)`` alone. ``attempt`` only selects
-  injected faults and never changes a successful result. Running a spec twice gives
-  bit-identical series (``numpy.array_equal``) and equal metrics and diagnostics.
-  Diagnostics hold no wall-clock values, so they may be included in output checksums.
-* Order of checks: (a) the bars must carry the signature the spec names, else
-  ``DataIntegrityError``; (b) fault injection, when ``spec.faults`` is set; (c) the params
-  are re-validated against the registered schema, else ``SpecError``; (d) dispatch to the
-  engine registered for ``(strategy.name, strategy.version)``.
-* Cancellation. Every long loop calls ``cancel.check()``, which raises ``TaskAborted``
-  (cancel, lease lost, shutdown) or ``TaskTimeout`` (deadline), within about 50 ms of
-  work.
+* The output is a function of ``(spec, bars)`` alone. ``attempt`` only selects injected faults.
+  Diagnostics hold no wall-clock values, so they can be part of output checksums.
+* Checks run in this order: bars carry the signature the spec names (``DataIntegrityError``),
+  fault injection, params re-validated (``SpecError``), dispatch on ``(strategy, version)``.
+  The bars are re-hashed so an unverified ``Bars`` label is still rejected.
+* Long loops call ``cancel.check()`` within about 50 ms of work.
 
-The built-in engine runs strategy ``pairs_zscore`` v1, then the metrics, then the
-stationary-bootstrap workload when ``workload.bootstrap_samples > 0``. The bootstrap metric
-keys are always present (``None`` / ``0`` without resamples). An optional external
-backtester adapter plugs in with :func:`register_engine`, after registering its params
-schema with :func:`quantgrid.domain.specs.register_strategy`.
+External backtesters plug in with :func:`register_engine` after ``specs.register_strategy``.
 """
 
 from __future__ import annotations
@@ -89,7 +78,6 @@ def register_engine(name: str, version: str, fn: EngineFn, *, replace: bool = Fa
 
 
 def unregister_engine(name: str, version: str) -> None:
-    """Remove a registration (no-op if absent). Intended for adapters and tests."""
     with _REGISTRY_LOCK:
         _REGISTRY.pop((name, version), None)
 
@@ -143,7 +131,6 @@ def _parse_params(spec: TaskSpec) -> BaseModel:
 def run_task_spec(
     spec: TaskSpec, bars: Bars, *, cancel: CancelToken, attempt: int = 1
 ) -> TaskOutput:
-    """Execute one immutable task spec on verified bars (see module docstring)."""
     if attempt < 1:
         raise ValueError("attempt numbers are 1-based")
     if bars.sha256 != spec.dataset.sha256:
@@ -176,7 +163,6 @@ def run_task_spec(
 def run_pairs_zscore_task(
     spec: TaskSpec, params: BaseModel, bars: Bars, cancel: CancelToken
 ) -> TaskOutput:
-    """Built-in engine for ``pairs_zscore`` v1: strategy + metrics + bootstrap workload."""
     if not isinstance(params, PairsZScoreParams):
         raise SpecError(f"expected PairsZScoreParams, got {type(params).__name__}")
     result = run_pairs_zscore(bars, params, spec.split, spec.fees, cancel=cancel)

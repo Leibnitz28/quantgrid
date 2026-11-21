@@ -1,4 +1,4 @@
-"""``quantgrid`` command: run services and operator tools.
+"""quantgrid command: run services and operator tools.
 
 quantgrid migrate                 apply Alembic migrations
 quantgrid api [--host --port]     HTTP API

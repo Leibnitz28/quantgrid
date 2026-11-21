@@ -1,8 +1,6 @@
 """SQLAlchemy table definitions (schema source of truth together with migration 0001).
 
-The repository layer (``storage/repository.py``) uses these tables through SQLAlchemy
-Core so every state-changing statement is an explicit, conditional SQL statement.
-Database triggers (installed by the migration) additionally enforce:
+Triggers installed by the migration additionally enforce:
 
 * the task state machine (``domain/states.py``) and immutability of task specs,
 * immutability of terminal attempts and of published result artifacts,
@@ -251,8 +249,7 @@ class WorkerHeartbeat(Base):
 
 
 class TaskTransition(Base):
-    """Append-only audit log, written exclusively by the ``qg_tasks_log_transition``
-    trigger (actor/reason come from the ``quantgrid.actor``/``quantgrid.reason`` GUCs)."""
+    """Append-only audit log written by the ``qg_tasks_log_transition`` trigger."""
 
     __tablename__ = "task_transitions"
 

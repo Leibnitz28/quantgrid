@@ -60,7 +60,7 @@ class WorkerRuntime:
             if self._started:
                 return
             self._started = True
-        self.heartbeat.beat_once()  # register immediately so the coordinator sees capacity
+        self.heartbeat.beat_once()
         self.heartbeat.start()
         log.info(
             "worker started",
@@ -72,8 +72,7 @@ class WorkerRuntime:
         )
 
     def begin_shutdown(self) -> None:
-        """Warm shutdown: stop taking new work (Celery stops consuming), finish the current
-        task, and advertise STOPPING so the coordinator stops counting this capacity."""
+        """Warm shutdown: finish the current task and advertise STOPPING."""
         self.heartbeat.state = "STOPPING"
         log.info(
             "worker shutting down",
@@ -89,7 +88,7 @@ class WorkerRuntime:
         self.heartbeat.stop()
         try:
             repo.mark_worker_state(self.engine, self.worker_id, "STOPPED")
-        except Exception:  # pragma: no cover - best effort during shutdown
+        except Exception:  # pragma: no cover
             log.exception("could not mark worker stopped")
         self.engine.dispose()
         log.info("worker stopped", extra={"worker_id": self.worker_id})

@@ -1,5 +1,4 @@
-"""Observability metrics registry (file is named test_obs_metrics because
-tests/unit/test_metrics.py belongs to the domain-metrics suite)."""
+"""Observability metrics registry (separate from the domain-metrics tests)."""
 
 from __future__ import annotations
 

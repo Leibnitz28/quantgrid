@@ -1,8 +1,7 @@
 """Prometheus metrics with bounded label sets (never task_id / batch_id labels).
 
-``create_metrics(registry)`` builds a fresh set of collectors; the module-level
-singletons below are created once on the default registry, so importing the module
-twice (or reloading it) never raises ``Duplicated timeseries``.
+The module-level collectors are created once per process so a reload does not raise
+``Duplicated timeseries``.
 """
 
 from __future__ import annotations
@@ -28,7 +27,7 @@ _TICK_BUCKETS = (0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10)
 
 
 def create_metrics(registry: CollectorRegistry) -> SimpleNamespace:
-    """Create every QuantGrid collector on ``registry`` and return them by name."""
+    """Create the collectors on ``registry`` and return them by name."""
 
     def counter(name: str, doc: str, labels: tuple[str, ...] = ()) -> Counter:
         return Counter(f"quantgrid_{name}", doc, labels, registry=registry)
@@ -92,7 +91,6 @@ def create_metrics(registry: CollectorRegistry) -> SimpleNamespace:
     )
 
 
-# Reuse collectors if this module is imported/reloaded again in the same process.
 _ns: SimpleNamespace = getattr(REGISTRY, "_quantgrid_metrics", None) or create_metrics(REGISTRY)
 REGISTRY._quantgrid_metrics = _ns  # type: ignore[attr-defined]
 http_requests_total: Counter = _ns.http_requests_total

@@ -1,17 +1,8 @@
-"""Pure helpers for benchmark reports (no I/O, no numpy needed).
+"""Pure helpers for benchmark reports (speedup, efficiency, Karp-Flatt, percentiles).
 
-* ``speedup(t1, tp) = t1 / tp`` and ``efficiency(t1, tp, p) = speedup / p``.
-* ``karp_flatt_serial_fraction(S, p) = (1/S - 1/p) / (1 - 1/p)`` for ``p > 1``: the
-  experimentally determined serial fraction (Karp & Flatt, 1990). It is 0 for perfect
-  linear speedup and 1 when ``S = 1``. It is negative for superlinear speedup, which is
-  usually a measurement artefact (warm caches) worth flagging, not hiding.
-* ``percentile(values, q)`` uses linear interpolation between closest ranks, identical to
-  ``numpy.percentile(values, q, method="linear")`` (same operation order, so results
-  are bit-identical).
-* ``summarize(values)`` returns ``{n, mean, p50, p95, p99, min, max}``.
-
-All functions reject empty, non-finite or out-of-range input with :class:`ValueError`
-rather than return a misleading number.
+``percentile`` matches ``numpy.percentile(..., method="linear")`` bit for bit (same operation
+order). A negative serial fraction means superlinear speedup, usually a measurement artefact
+that is reported rather than hidden. Empty, non-finite or out-of-range input raises ValueError.
 """
 
 from __future__ import annotations
@@ -54,12 +45,10 @@ def _workers(p: int) -> int:
 
 
 def speedup(t1: float, tp: float) -> float:
-    """``T1 / Tp``. Both wall times must be finite and positive."""
     return _positive_finite("t1", t1) / _positive_finite("tp", tp)
 
 
 def efficiency(t1: float, tp: float, p: int) -> float:
-    """Parallel efficiency ``speedup / p`` (1.0 = perfect linear scaling)."""
     return speedup(t1, tp) / _workers(p)
 
 
@@ -111,7 +100,6 @@ def _percentile_sorted(data: list[float], q: float) -> float:
 
 
 def percentile(values: Iterable[float], q: float) -> float:
-    """``q``-th percentile (``0 <= q <= 100``) with linear interpolation."""
     qf = float(q)
     if not (math.isfinite(qf) and 0.0 <= qf <= 100.0):
         raise ValueError(f"q must be within [0, 100], got {q!r}")

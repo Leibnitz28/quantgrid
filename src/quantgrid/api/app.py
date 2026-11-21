@@ -81,7 +81,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         yield
-        ctx.engine.dispose()  # graceful shutdown: close pooled connections
+        ctx.engine.dispose()
 
     app = FastAPI(
         title="QuantGrid API",

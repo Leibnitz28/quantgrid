@@ -1,11 +1,9 @@
 """AI experiment planner: proposes a bounded ``ExperimentBatchSpec``; never submits it.
 
-Pipeline (every stage is deterministic code; the model is one untrusted input):
-goal length check -> agent loop with read-only tools -> strict single-JSON extraction ->
-strict ``ExperimentBatchSpec`` validation (unknown fields rejected) -> ``PolicyService``
-evaluation with the effective quota (``max_tasks`` can only *narrow* it). ``plan()``
-persists and enqueues nothing; a human submits the returned spec via ``POST /v1/batches``,
-which re-runs policy.
+Pipeline: goal length check -> agent loop with read-only tools -> single-JSON extraction ->
+strict ``ExperimentBatchSpec`` validation -> ``PolicyService`` evaluation (``max_tasks`` can
+only narrow the quota). ``plan()`` persists and enqueues nothing; submitting the spec via
+``POST /v1/batches`` re-runs policy.
 """
 
 from __future__ import annotations
@@ -59,9 +57,9 @@ class OutputError(ValueError):
 
 
 def extract_single_json(text: str) -> object:
-    """The one JSON object in ``text``: the whole text, or exactly one fenced block.
+    """The single JSON object in ``text`` (whole text or one fenced block).
 
-    Raises :class:`OutputError` for no JSON, malformed JSON, or more than one JSON object.
+    Raises :class:`OutputError` otherwise.
     """
     if len(text) > MAX_FINAL_CHARS:
         raise OutputError("final answer too large")
@@ -70,7 +68,7 @@ def extract_single_json(text: str) -> object:
         try:
             return json.loads(stripped)
         except json.JSONDecodeError:
-            pass  # may be prose-with-braces; fall through to fence handling
+            pass  # may be prose with braces; try fenced block
     fences = _FENCE.findall(text)
     json_fences = [body for lang, body in fences if lang.lower() in ("json", "")]
     if len(json_fences) > 1:
@@ -150,7 +148,6 @@ class PlannerService:
         if dataset is not None and self.catalog.get(dataset) is None:
             return result("error", [f"unknown dataset {dataset!r}"])
 
-        # max_tasks may only narrow the quota, never widen it.
         effective = quota
         if max_tasks is not None and max_tasks < quota.max_tasks_per_batch:
             effective = quota.model_copy(update={"max_tasks_per_batch": max_tasks})

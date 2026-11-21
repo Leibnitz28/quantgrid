@@ -1,9 +1,8 @@
 """Integration-test fixtures: a throwaway PostgreSQL database per pytest session.
 
-Each session creates ``qg_it_<random>`` (the ``quantgrid`` role has CREATEDB), applies the
-Alembic migrations to it, and drops it afterwards, so concurrent test runs never share
-state. Tests are skipped (not failed) when no PostgreSQL is reachable; start one with
-``scripts/dev_services.sh start`` or point ``QG_TEST_DATABASE_URL`` at a server.
+Each session creates ``qg_it_<random>``, applies the migrations and drops it afterwards.
+Tests are skipped when no PostgreSQL is reachable (``scripts/dev_services.sh start`` or
+set ``QG_TEST_DATABASE_URL``).
 """
 
 from __future__ import annotations
@@ -79,7 +78,7 @@ def engine(db_url: str) -> Iterator[Engine]:
 
 @pytest.fixture
 def clean_db(engine: Engine) -> Engine:
-    """Function-scoped: empty all tables before the test."""
+    """Empty all tables before each test."""
     with engine.begin() as conn:
         conn.execute(text(f"TRUNCATE {', '.join(TABLES)} RESTART IDENTITY CASCADE"))
     return engine

@@ -12,7 +12,6 @@ from typing import Any, Literal
 
 
 class ErrorCode(StrEnum):
-    # --- request / API level -------------------------------------------------------
     VALIDATION_ERROR = "VALIDATION_ERROR"
     NOT_FOUND = "NOT_FOUND"
     RATE_LIMITED = "RATE_LIMITED"
@@ -22,7 +21,6 @@ class ErrorCode(StrEnum):
     PAYLOAD_TOO_LARGE = "PAYLOAD_TOO_LARGE"
     PLANNER_ERROR = "PLANNER_ERROR"
     INTERNAL_ERROR = "INTERNAL_ERROR"
-    # --- task execution (attempt.error_code); API umbrella type WORKER_FAILURE -------
     WORKER_FAILURE = "WORKER_FAILURE"
     WORKER_LOST = "WORKER_LOST"  # lease expired: worker crashed, was killed or stalled
     TASK_TIMEOUT = "TASK_TIMEOUT"
@@ -104,14 +102,7 @@ class PlannerError(QuantGridError):
     http_status = 502
 
 
-# --------------------------------------------------------------------------------------
-# Task execution errors (raised inside workers / the domain engine)
-# --------------------------------------------------------------------------------------
-
-
 class TaskExecutionError(QuantGridError):
-    """A task attempt failed. ``code`` is recorded on the attempt row."""
-
     code = ErrorCode.TASK_ERROR
     retryable = True
 
@@ -158,12 +149,10 @@ AbortReason = Literal["CANCELED", "LEASE_LOST", "SHUTDOWN"]
 
 
 class TaskAborted(Exception):
-    """Cooperative stop signal raised by a cancel token inside long computations.
+    """Cooperative stop raised by a cancel token.
 
-    * ``CANCELED``   - the batch was cancelled; the worker acknowledges the cancel.
-    * ``LEASE_LOST`` - the coordinator reclaimed the lease; the worker must not publish.
-    * ``SHUTDOWN``   - the worker process is shutting down; the lease will expire and the
-      coordinator re-queues the task.
+    ``CANCELED``: acknowledge the cancel. ``LEASE_LOST``: the worker must not publish.
+    ``SHUTDOWN``: the lease expires and the coordinator re-queues the task.
     """
 
     def __init__(self, reason: AbortReason) -> None:

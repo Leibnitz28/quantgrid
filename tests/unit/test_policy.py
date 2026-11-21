@@ -112,9 +112,6 @@ def test_cost_model_monotone_and_chunked() -> None:
     assert cm.memory_mb_per_task(1000, 500, 0) == pytest.approx(160 + 256 * 1000 / 1e6)
 
 
-# ---- one spec per violation -----------------------------------------------------------
-
-
 def test_strategy_unregistered(svc: PolicyService) -> None:
     d = svc.evaluate(make_spec(strategy={"name": "nope", "version": "1"}), QuotaPolicy())
     assert codes(d) == {"STRATEGY_NOT_ALLOWED"} and not d.allowed
@@ -329,9 +326,6 @@ def test_multiple_violations_accumulate(svc: PolicyService) -> None:
     } <= codes(d)
 
 
-# ---- error_type -----------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("code", sorted(QUOTA_VIOLATIONS))
 def test_error_type_quota(code: str) -> None:
     d = PolicyDecision(
@@ -369,9 +363,6 @@ def test_every_violation_code_is_classified() -> None:
     from quantgrid.domain.policy import ViolationCode
 
     assert set(get_args(ViolationCode)) >= QUOTA_VIOLATIONS
-
-
-# ---- admit / expansion safety ---------------------------------------------------------
 
 
 def test_admit_returns_tasks_when_allowed(svc: PolicyService) -> None:
@@ -435,9 +426,6 @@ def test_runtime_warning_when_estimate_exceeds_budget() -> None:
     )
     d = svc.evaluate(spec, QuotaPolicy(max_bootstrap_samples=50_000))
     assert any("may time out" in w for w in d.warnings)
-
-
-# ---- QuotaPolicy ----------------------------------------------------------------------
 
 
 def test_quota_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:

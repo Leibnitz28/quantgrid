@@ -88,11 +88,6 @@ def synthetic_bars(n: int, seed: int = 0) -> Bars:
     )
 
 
-# --------------------------------------------------------------------------------------
-# Split resolution
-# --------------------------------------------------------------------------------------
-
-
 class TestResolveSplit:
     def test_fraction_mode_with_embargo(self) -> None:
         idx = resolve_split(hourly_ts(1000), SplitSpec(train_fraction=0.6, embargo_bars=10), 20)
@@ -210,11 +205,6 @@ class TestResolveSplit:
             datetime_to_ns(datetime(2020, 1, 1))  # naive
 
 
-# --------------------------------------------------------------------------------------
-# Hedge ratio
-# --------------------------------------------------------------------------------------
-
-
 class TestHedgeRatio:
     def test_recovers_an_exact_linear_relation(self) -> None:
         lx = np.log(np.linspace(20.0, 80.0, 300))
@@ -245,11 +235,6 @@ class TestHedgeRatio:
         lx = np.full(200, math.log(37.0))
         with pytest.raises(SpecError, match="zero"):
             fit_hedge_ratio(lx, np.linspace(0, 1, 200), 200)
-
-
-# --------------------------------------------------------------------------------------
-# Rolling statistics and z-scores
-# --------------------------------------------------------------------------------------
 
 
 class TestRollingStats:
@@ -319,11 +304,6 @@ class TestRollingStats:
         assert SD_FLOOR == 1e-12
 
 
-# --------------------------------------------------------------------------------------
-# Position state machine
-# --------------------------------------------------------------------------------------
-
-
 def positions(z: list[float], **kw: object) -> list[int]:
     return compute_positions(np.array(z, dtype=np.float64), params(**kw)).tolist()
 
@@ -373,11 +353,6 @@ class TestPositions:
         assert token.checks >= 3
         with pytest.raises(TaskAborted):
             compute_positions(z, params(), cancel=CountingToken(abort_at=2))
-
-
-# --------------------------------------------------------------------------------------
-# Full run
-# --------------------------------------------------------------------------------------
 
 
 class TestRunPairsZScore:
@@ -443,11 +418,6 @@ class TestRunPairsZScore:
         for key, arr in a.series().items():
             assert np.array_equal(arr, b.series()[key], equal_nan=True), key
         assert (st.STRATEGY_NAME, st.STRATEGY_VERSION) == ("pairs_zscore", "1")
-
-
-# --------------------------------------------------------------------------------------
-# Adversarial review: hand-computed end-to-end example and look-ahead invariance
-# --------------------------------------------------------------------------------------
 
 
 def _spike_bars(extra: dict[int, float] | None = None) -> Bars:

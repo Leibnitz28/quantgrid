@@ -1,4 +1,4 @@
-# ADR 0001 — PostgreSQL is the source of truth; Celery/Redis is only a transport
+# ADR 0001: PostgreSQL is the source of truth; Celery/Redis is only a transport
 
 **Status:** accepted
 
@@ -22,5 +22,5 @@ logical task produced exactly one published result.
 
 ## Consequences
 * Progress, costs and attempt history are SQL queries; the verifier can prove invariants.
-* One extra DB round-trip per task (claim) — measured in `benchmarks/` as scheduler overhead.
+* One extra DB round-trip per task (claim): measured in `benchmarks/` as scheduler overhead.
 * Redis can be flushed without losing work (tasks are re-dispatched from the DB).

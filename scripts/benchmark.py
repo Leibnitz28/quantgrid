@@ -1,26 +1,17 @@
 #!/usr/bin/env python
-"""Scaling benchmark for QuantGrid: measured T1/T2/T4, speedup, efficiency, overhead.
+"""Scaling benchmark: measures makespan, speedup, efficiency and overhead per worker count.
 
-For each worker count p (default 1, 2, 4) a FRESH local stack (coordinator + p worker
-processes, one numeric thread each) is started against the configured PostgreSQL/Redis,
-a warm-up batch runs, then ``--reps`` repetitions of a mixed CPU-bound workload:
+For each worker count (--workers) it starts a fresh local stack (coordinator plus that many
+single-threaded workers) against the configured PostgreSQL/Redis, runs one warm-up batch,
+then --reps repetitions of a mixed workload: --long-tasks tasks with --long-bootstrap
+bootstrap resamples and --short-tasks tasks without bootstrap. A task-count sweep
+(--sweep-counts, skip with --no-sweep) runs at each worker count. Seeds are fresh per run,
+so no result is served from cache.
 
-* ``--long-tasks``  tasks with ``--long-bootstrap`` bootstrap resamples (long, CPU-bound)
-* ``--short-tasks`` tasks without bootstrap (short; dominated by scheduler overhead)
+Run: python scripts/benchmark.py [--workers 1,2,4] [--reps 3] [--out-dir DIR]
 
-submitted together (long batch first). Every run uses fresh seeds so every artifact is
-newly computed and written (no cache, no content-address deduplication). A task-count
-sweep (``--sweep-counts``) at each p shows how overhead dominates at low task counts.
-
-Measured per run (from PostgreSQL timestamps, i.e. one clock):
-  makespan T_p (submission -> last task published), tasks/min, queue wait p50/p95/p99,
-  task wall time p50/p95, worker utilisation, inter-task gap per worker (scheduler
-  round-trip), CPU% / RSS of worker processes (psutil sampling), artifact writes.
-Derived: speedup S_p = T1/Tp, efficiency E_p = S_p/p, Karp-Flatt serial fraction.
-
-Outputs in ``--out-dir`` (default benchmarks/results/<UTC timestamp>/): runs.csv,
-attempts.csv, samples.csv, summary.json, REPORT.md, speedup.svg, efficiency_vs_tasks.svg.
-Nothing is pre-filled: every number in the report comes from this run.
+Writes to --out-dir (default benchmarks/results/<UTC timestamp>/): runs.csv, attempts.csv,
+samples.csv, summary.json, REPORT.md, speedup.svg, efficiency_vs_tasks.svg.
 """
 
 from __future__ import annotations
@@ -57,7 +48,6 @@ from quantgrid.storage import repository as repo  # noqa: E402
 from quantgrid.storage.db import make_engine  # noqa: E402
 
 
-# ------------------------------------------------------------------------------ stats
 def pct(values: list[float], q: float) -> float | None:
     """Percentile with linear interpolation (numpy 'linear' / Excel PERCENTILE.INC)."""
     if not values:
@@ -76,9 +66,8 @@ def r(value: float | None, nd: int = 3) -> float | None:
     return None if value is None else round(value, nd)
 
 
-# ------------------------------------------------------------------------------ sampling
 class Sampler(threading.Thread):
-    """Samples CPU% and RSS of the given processes (and the whole host) periodically."""
+    """Periodically samples CPU% and RSS of the given processes and host CPU%."""
 
     def __init__(self, pids: dict[str, int], interval: float = 0.25) -> None:
         super().__init__(daemon=True)
@@ -119,7 +108,6 @@ class Sampler(threading.Thread):
         return self.samples
 
 
-# ------------------------------------------------------------------------------ workload
 QUOTA = QuotaPolicy(
     max_tasks_per_batch=5000,
     max_worker_seconds_per_batch=10**7,
@@ -285,7 +273,6 @@ def measure(
     )
 
 
-# ------------------------------------------------------------------------------ charts
 SVG_STYLE = """
 <style>
   .viz { --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
@@ -337,7 +324,7 @@ def speedup_svg(points: list[dict[str, Any]], path: Path, caption: str) -> None:
             f'<line class="grid" x1="{left}" x2="{left + pw}" y1="{y(tick):.1f}" y2="{y(tick):.1f}"/>'
         )
         parts.append(
-            f'<text class="tick" x="{left - 8}" y="{y(tick) + 4:.1f}" text-anchor="end">{tick}×</text>'
+            f'<text class="tick" x="{left - 8}" y="{y(tick) + 4:.1f}" text-anchor="end">{tick}x</text>'
         )
     parts.append(
         f'<line class="axis" x1="{left}" x2="{left + pw}" y1="{y(0):.1f}" y2="{y(0):.1f}"/>'
@@ -360,7 +347,7 @@ def speedup_svg(points: list[dict[str, Any]], path: Path, caption: str) -> None:
             f'<line class="whisker" x1="{cx:.1f}" x2="{cx:.1f}" y1="{y(pt["speedup_min"]):.1f}" y2="{y(pt["speedup_max"]):.1f}"/>'
         )
         tip = (
-            f"{pt['workers']} worker(s): speedup {pt['speedup_mean']:.2f}× "
+            f"{pt['workers']} worker(s): speedup {pt['speedup_mean']:.2f}x "
             f"(efficiency {pt['efficiency'] * 100:.0f}%), mean makespan {pt['makespan_mean']:.2f} s"
         )
         parts.append(
@@ -369,17 +356,16 @@ def speedup_svg(points: list[dict[str, Any]], path: Path, caption: str) -> None:
     end = points[-1]
     parts.append(
         f'<text class="label" x="{x(end["workers"]) + 10:.1f}" y="{y(end["speedup_mean"]) + 4:.1f}">'
-        f"{end['speedup_mean']:.2f}× ({end['efficiency'] * 100:.0f}% eff.)</text>"
+        f"{end['speedup_mean']:.2f}x ({end['efficiency'] * 100:.0f}% eff.)</text>"
     )
     parts.append(
-        f'<text class="label" x="{x(max_p) + 10:.1f}" y="{y(max_p) + 4:.1f}">ideal {max_p}×</text>'
+        f'<text class="label" x="{x(max_p) + 10:.1f}" y="{y(max_p) + 4:.1f}">ideal {max_p}x</text>'
     )
-    # legend (2 entries: measured series + reference line)
     lx, ly = left, 64
     parts.append(
         f'<line class="series" x1="{lx}" x2="{lx + 18}" y1="{ly}" y2="{ly}"/>'
         f'<circle class="dot" cx="{lx + 9}" cy="{ly}" r="4"/>'
-        f'<text class="label" x="{lx + 26}" y="{ly + 4}">measured speedup T1/Tp (mean, min–max whiskers)</text>'
+        f'<text class="label" x="{lx + 26}" y="{ly + 4}">measured speedup T1/Tp (mean, min-max whiskers)</text>'
     )
     parts.append(
         f'<line class="ref" x1="{lx + 330}" x2="{lx + 348}" y1="{ly}" y2="{ly}"/>'
@@ -389,7 +375,7 @@ def speedup_svg(points: list[dict[str, Any]], path: Path, caption: str) -> None:
 
 
 def efficiency_svg(points: list[dict[str, Any]], path: Path, caption: str, p: int) -> None:
-    """points: n_tasks, efficiency (fraction). Single series -> no legend box."""
+    """points: n_tasks, efficiency (fraction)."""
     w, h, left, right, top, bottom = 640, 360, 56, 130, 64, 46
     pw, ph = w - left - right, h - top - bottom
     ns = [pt["n_tasks"] for pt in points]
@@ -446,7 +432,6 @@ def efficiency_svg(points: list[dict[str, Any]], path: Path, caption: str, p: in
     )
 
 
-# ------------------------------------------------------------------------------ environment
 def environment(engine: Engine, ds: DatasetInfo) -> dict[str, Any]:
     cpu_model = "unknown"
     try:
@@ -492,7 +477,6 @@ def environment(engine: Engine, ds: DatasetInfo) -> dict[str, Any]:
     }
 
 
-# ------------------------------------------------------------------------------ main
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -585,7 +569,6 @@ def main() -> int:
                     )
                 )
 
-    # ---------------------------------------------------------------- aggregate
     main_runs = [x for x in results if x.phase == "main"]
     t_by_p = {p: [x.makespan_s for x in main_runs if x.workers == p] for p in worker_counts}
     t1 = mean(t_by_p.get(1, [])) if 1 in t_by_p else None
@@ -661,7 +644,6 @@ def main() -> int:
                         }
                     )
 
-    # ---------------------------------------------------------------- write outputs
     with (out / "runs.csv").open("w", newline="") as f:
         rows_all = [x.row for x in results]
         writer = csv.DictWriter(f, fieldnames=list(rows_all[0].keys()))
@@ -758,7 +740,7 @@ def main() -> int:
         efficiency_svg(
             sweep_pts,
             out / "efficiency_vs_tasks.svg",
-            f"tasks with {args.sweep_bootstrap} bootstrap samples · efficiency = T1 / (p × Tp)",
+            f"tasks with {args.sweep_bootstrap} bootstrap samples · efficiency = T1 / (p x Tp)",
             pmax,
         )
     write_report(out, summary)
@@ -770,10 +752,9 @@ def main() -> int:
 def write_report(out: Path, s: dict[str, Any]) -> None:
     e, w = s["environment"], s["workload"]
     lines = [
-        f"# QuantGrid scaling benchmark — run {s['run_id']}",
+        f"# QuantGrid scaling benchmark: run {s['run_id']}",
         "",
-        "All numbers below were measured by `scripts/benchmark.py` in this run; raw data is in",
-        "`runs.csv`, `attempts.csv` and `samples.csv` next to this file.",
+        "Generated by `scripts/benchmark.py`. Raw data: `runs.csv`, `attempts.csv`, `samples.csv`.",
         "",
         "## Environment",
         "",
@@ -782,7 +763,7 @@ def write_report(out: Path, s: dict[str, Any]) -> None:
         f"| git commit | `{e['git'].get('git_commit')}` (dirty: {e['git'].get('git_dirty')}) |",
         f"| code_sha | `{e['code_sha'][:16]}…` |",
         f"| OS / kernel | {e['os']} / {e['kernel']} |",
-        f"| CPU | {e['cpu_model']} × {e['logical_cpus']} logical CPUs |",
+        f"| CPU | {e['cpu_model']} x {e['logical_cpus']} logical CPUs |",
         f"| RAM | {e['ram_gb']} GB |",
         f"| Python / numpy / pyarrow | {e['python']} / {e['numpy']} / {e['pyarrow']} |",
         f"| PostgreSQL / Redis | {e['postgres']} / {e['redis']} |",
@@ -793,12 +774,12 @@ def write_report(out: Path, s: dict[str, Any]) -> None:
         "",
         "## Scaling (main workload)",
         "",
-        "| workers | reps | makespan mean (min–max) s | speedup T1/Tp | efficiency | Karp–Flatt e | tasks/min | queue wait p50 / p95 / p99 ms | utilisation | inter-task gap p50 ms | worker CPU % (mean) | worker RSS max MB | host CPU % |",
+        "| workers | reps | makespan mean (min-max) s | speedup T1/Tp | efficiency | Karp-Flatt e | tasks/min | queue wait p50 / p95 / p99 ms | utilisation | inter-task gap p50 ms | worker CPU % (mean) | worker RSS max MB | host CPU % |",
         "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for t in s["scaling"]:
         lines.append(
-            f"| {t['workers']} | {t['reps']} | {t['makespan_mean_s']} ({t['makespan_min_s']}–{t['makespan_max_s']}) | "
+            f"| {t['workers']} | {t['reps']} | {t['makespan_mean_s']} ({t['makespan_min_s']}-{t['makespan_max_s']}) | "
             f"{t['speedup']} | {t['efficiency']} | {t['karp_flatt']} | {t['tasks_per_min']} | "
             f"{t['queue_wait_p50_ms']} / {t['queue_wait_p95_ms']} / {t['queue_wait_p99_ms']} | {t['utilization']} | "
             f"{t['intertask_gap_p50_ms']} | {t['worker_cpu_pct_mean']} | {t['worker_rss_mb_max']} | {t['host_cpu_pct_mean']} |"
@@ -819,19 +800,19 @@ def write_report(out: Path, s: dict[str, Any]) -> None:
     lines += [
         "## Method",
         "",
-        "* Makespan T_p = (last task `finished_at`) − (DB `now()` immediately before submission); both from PostgreSQL's clock.",
-        "* Queue wait = claim time − time the task became eligible (`ready_at`), so it includes time waiting in the database for a dispatch slot.",
-        "* Utilisation = Σ task wall time / (p × T_p). Inter-task gap = time between a worker publishing one task and starting the next (scheduler round trip).",
-        "* Speedup S_p = mean(T1)/mean(Tp); efficiency E_p = S_p/p; Karp–Flatt serial fraction e = (1/S − 1/p)/(1 − 1/p).",
-        "* Each worker count gets fresh processes and one excluded warm-up batch; every run uses new seeds, so every artifact is computed and written (cache bypassed, no content-address dedup).",
+        "* Makespan T_p = last task `finished_at` minus PostgreSQL `now()` just before submission (one clock).",
+        "* Queue wait = claim time minus `ready_at`. It includes time waiting in the database for a dispatch slot.",
+        "* Utilisation = sum of task wall time / (p * T_p). Inter-task gap = time from a worker publishing one task to starting the next.",
+        "* Speedup S_p = mean(T1) / mean(Tp). Efficiency E_p = S_p / p. Karp-Flatt e = (1/S - 1/p) / (1 - 1/p).",
+        "* Each worker count uses fresh processes and one excluded warm-up batch. Seeds are new for every run and the cache is bypassed, so every artifact is computed and written.",
         "",
         "## Measurement bias and caveats",
         "",
-        "* Coordinator, PostgreSQL, Redis, the benchmark driver and all workers share the same host; at 4 workers on a 4-vCPU machine they compete for CPU, so T4 understates what dedicated worker hosts would achieve.",
-        "* The host is a virtual machine: CPU frequency, turbo and steal time are not controlled; spread across repetitions is reported (min–max) instead of a single number.",
-        "* Short tasks are deliberately included: their cost is dominated by per-task scheduler overhead (claim, publish, NOTIFY → dispatch), which bounds efficiency at small batch sizes.",
-        "* Numerical libraries run single-threaded per process (OMP/OpenBLAS/MKL threads = 1); results do not transfer to multi-threaded configurations.",
-        "* Artifacts are written to a local filesystem with fsync; network/object storage would add latency per task.",
+        "* Coordinator, PostgreSQL, Redis, the driver and all workers share one host and compete for CPU. When workers approach the vCPU count, T_p is inflated relative to dedicated worker hosts.",
+        "* The host is a virtual machine. CPU frequency, turbo and steal time are not controlled. Min-max across repetitions is reported.",
+        "* Short tasks are dominated by per-task scheduler overhead (claim, publish, NOTIFY and dispatch), which bounds efficiency at small batch sizes.",
+        "* Numerical libraries run single-threaded per process (OMP/OpenBLAS/MKL threads = 1). Results do not apply to multi-threaded configurations.",
+        "* Artifacts go to a local filesystem with fsync. Network or object storage would add latency per task.",
     ]
     (out / "REPORT.md").write_text("\n".join(lines) + "\n")
 

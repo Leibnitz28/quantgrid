@@ -63,8 +63,6 @@ class CancelToken(Protocol):
 
 
 class NullCancelToken:
-    """Never cancels (unit tests, local reproduction)."""
-
     def check(self) -> None:
         return None
 

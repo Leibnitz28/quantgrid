@@ -1,19 +1,9 @@
-"""Deliberately slow, pure-Python reference implementation of ``pairs_zscore`` v1.
+"""Slow pure-Python reference implementation of ``pairs_zscore`` v1, for differential tests only.
 
-Written independently of :mod:`quantgrid.domain.strategy` and
-:mod:`quantgrid.domain.metrics`, from the same specification text, for differential
-testing only. It uses explicit Python loops, the ``math`` module (``math.fsum`` for every
-sum) and no vectorised numpy. The cost is O(n * lookback), so production code must not
-call it.
-
-Implementation differences that are deliberate, so the comparison means something:
-
-* Split boundaries come from a linear scan, not a binary search. Timestamps are
-  converted with ``calendar.timegm``.
-* Rolling statistics use a direct two-pass computation per window, not cumulative sums.
-* The holding period is a ``held`` counter, as the specification words it (``held = 1``
-  on the entry bar, then +1 per bar), not ``i - entry_index``.
-* All sums are exactly rounded (``math.fsum``), not numpy pairwise sums.
+Written independently of ``strategy`` and ``metrics`` from the same spec text, using explicit
+loops, ``math.fsum`` for every sum and no vectorised numpy. The implementation choices differ
+on purpose (linear-scan split boundaries, two-pass window statistics, a ``held`` counter) so
+that agreement means something. O(n * lookback): production code must not call it.
 """
 
 from __future__ import annotations
@@ -196,7 +186,6 @@ def _finite(value: float) -> float | None:
 
 
 def reference_metrics(res: ReferenceResult) -> dict[str, float | int | None]:
-    """Core metrics of a reference run (same definitions as :mod:`metrics`)."""
     r = res.ret
     n = len(r)
     diffs: list[int] = []
@@ -285,7 +274,6 @@ def reference_run(
     split: SplitSpec,
     fees: FeeModel,
 ) -> ReferenceResult:
-    """Run the whole pipeline (split, OLS, z-scores, positions, returns, metrics)."""
     ts_list = [int(t) for t in ts]
     n = len(ts_list)
     lookback = params.lookback

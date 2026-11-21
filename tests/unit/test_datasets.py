@@ -105,11 +105,6 @@ def _write_table(
     pq.write_table(table, path, **kwargs)  # type: ignore[arg-type]
 
 
-# --------------------------------------------------------------------------------------
-# Registry and generator
-# --------------------------------------------------------------------------------------
-
-
 class TestRegistry:
     def test_required_datasets_and_shapes(self) -> None:
         defs = DATASET_DEFINITIONS
@@ -256,11 +251,6 @@ class TestGenerator:
             generate_bars(SMALL)
 
 
-# --------------------------------------------------------------------------------------
-# Content hash and validation
-# --------------------------------------------------------------------------------------
-
-
 class TestContentHash:
     def test_hash_follows_documented_byte_layout(self, generated: dict[str, Bars]) -> None:
         b = generated[SMALL]
@@ -356,11 +346,6 @@ class TestValidateBars:
         assert info.value.retryable is False
 
 
-# --------------------------------------------------------------------------------------
-# Catalog
-# --------------------------------------------------------------------------------------
-
-
 class TestCatalog:
     def test_catalog_entries_describe_the_generated_data(self, generated: dict[str, Bars]) -> None:
         catalog = get_catalog()
@@ -400,11 +385,6 @@ class TestCatalog:
         decision = service.evaluate(tampered, QuotaPolicy())
         assert not decision.allowed
         assert {v.code for v in decision.violations} == {"DATASET_SIGNATURE_MISMATCH"}
-
-
-# --------------------------------------------------------------------------------------
-# Materialisation and loading
-# --------------------------------------------------------------------------------------
 
 
 class TestMaterializeAndLoad:
@@ -585,11 +565,6 @@ class TestMaterializeAndLoad:
         _write_table(dataset_path(SMALL, tmp_path), ts, b.close_x, b.close_y)
         with pytest.raises(DataIntegrityError, match="duplicate"):
             load_bars(dataset_ref(SMALL), tmp_path, auto_materialize=False)
-
-
-# --------------------------------------------------------------------------------------
-# Cache
-# --------------------------------------------------------------------------------------
 
 
 def _fake_bars(tag: str) -> Bars:

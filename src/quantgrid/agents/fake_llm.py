@@ -1,9 +1,8 @@
 """Deterministic offline providers: :class:`FakeLLM` (default, used by CI) and
-:class:`ScriptedLLM` (replays fixed turns to simulate a malicious/compromised model).
+:class:`ScriptedLLM` (replays fixed turns to simulate a compromised model).
 
-``FakeLLM`` is a pure rule-based function of (tools offered, user message, tool results):
-identical inputs always produce identical outputs. It is *not* trusted by the system -
-its output goes through the same strict parsing and policy checks as a real model's.
+``FakeLLM`` is a pure function of (tools offered, user message, tool results). Its output
+gets the same parsing and policy checks as a real model's.
 """
 
 from __future__ import annotations
@@ -27,11 +26,6 @@ from quantgrid.agents.prompts import GOAL_CLOSE, GOAL_OPEN
 _NUM = r"(\d+(?:\.\d+)?)"
 _RANGE = rf"{_NUM}\s*(?:-|to|\.\.|\u2013)\s*{_NUM}"
 MAX_SEED_COUNT = 8
-
-
-# --------------------------------------------------------------------------------------
-# Goal parsing
-# --------------------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -167,11 +161,6 @@ def _trim_grid(
     return grid, seeds
 
 
-# --------------------------------------------------------------------------------------
-# Sessions
-# --------------------------------------------------------------------------------------
-
-
 @dataclass
 class _PlannerSession:
     goal: ParsedGoal | None = None
@@ -216,7 +205,6 @@ class _PlannerSession:
             self.spec = self._draft()
             self.stage = 5
             return _calls(("validate_spec", {"spec": self.spec}))
-        # stage 5: validate_spec result
         content = res.content or {}
         if not content.get("allowed", False) and not self.adjusted:
             self.adjusted = True
@@ -230,7 +218,7 @@ class _PlannerSession:
 
     def _draft(self) -> dict[str, Any]:
         g = self.goal
-        assert g is not None  # noqa: S101 - set in send_user
+        assert g is not None  # noqa: S101
         grid: dict[str, list[Any]] = {"lookback": list(g.lookbacks), "entry_z": list(g.entries)}
         cap = int(self.quota.get("max_tasks_per_batch", 5000))
         if g.max_tasks is not None:
@@ -326,8 +314,7 @@ class _ExplainerSession:
 
 
 def _safe_token(value: Any) -> str:
-    """Only short upper-case identifiers survive; anything else (e.g. injected text) is
-    replaced, so tool-result prose can never flow into the explanation verbatim."""
+    """Keep only short upper-case identifiers so tool-result prose never reaches the explanation."""
     s = str(value)
     return s if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,39}", s) else "OTHER"
 
@@ -357,7 +344,7 @@ class _FakeSession:
 
 
 class FakeLLM:
-    """Deterministic rule-based provider; role is inferred from the offered tools."""
+    """Rule-based provider; the role is inferred from the offered tools."""
 
     name = "fake"
 
@@ -371,7 +358,7 @@ class FakeLLM:
 
 
 class ScriptedLLM:
-    """Replays a fixed list of turns (a 'compromised model'); records what it was sent."""
+    """Replays fixed turns and records what it was sent."""
 
     name = "scripted"
 

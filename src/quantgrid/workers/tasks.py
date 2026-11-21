@@ -12,8 +12,8 @@ from quantgrid.workers.runtime import get_runtime
 
 @celery_app.task(name=TASK_NAME, acks_late=True, ignore_result=True)
 def run_task(task_id: str, trace: dict[str, str] | None = None) -> str:
-    """Wake-up handler: try to claim and run ``task_id``. Always returns normally for
-    expected outcomes (including "not claimable"), so the message is acknowledged."""
+    """Wake-up handler. Returns normally for expected outcomes (including "not claimable")
+    so the message is acknowledged."""
     trace_id = None
     try:
         from quantgrid.observability.tracing import current_trace_id, span, use_context

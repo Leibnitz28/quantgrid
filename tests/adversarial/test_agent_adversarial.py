@@ -1,7 +1,7 @@
 """A compromised or prompt-injected model must still be stopped by deterministic code.
 
-ScriptedLLM plays a model that does exactly what an attacker wants; the assertions check
-that policy, strict parsing, the read-only allowlist and the budgets hold regardless.
+ScriptedLLM plays a model that does what an attacker wants; policy, strict parsing, the
+read-only allowlist and the budgets must still hold.
 """
 
 from __future__ import annotations
@@ -78,9 +78,6 @@ def huge_spec(cat):
     )
 
 
-# ---- malformed / hostile tool calls ---------------------------------------------------
-
-
 @pytest.mark.parametrize("name", WRITE_NAMES)
 def test_write_and_exec_tools_do_not_exist(env, name):
     llm = ScriptedLLM([call(name, {"batch_id": "b", "cmd": "rm -rf /"}), final("{}")])
@@ -134,9 +131,6 @@ def test_non_dict_arguments_from_model(env):
     assert llm.sent[1][0].ok is False
 
 
-# ---- prompt injection --------------------------------------------------------------------
-
-
 def test_obedient_model_injected_via_goal_is_stopped_by_policy(env):
     _, cat, _ = env
     # The model "obeys" the goal: proposes a 10^9-task grid and tries to submit it.
@@ -185,8 +179,7 @@ def test_injection_in_dataset_description_returned_by_tool(env):
     )
     r = svc.plan("plain goal", quota=quota())
     assert r.status == "rejected" and any(e.startswith("GRID_TOO_LARGE") for e in r.errors)
-    # the injected text reached the model only inside a tool result (data channel)
-    # and the planner's own deterministic FakeLLM ignores it entirely:
+    # the injected text reaches the model only inside a tool result
     ok = PlannerService(FakeLLM(), policy, cat, fast_settings()).plan("quick", quota=quota())
     assert ok.status == "ok" and ok.spec is not None and ok.spec.task_count() <= 8
     assert "OVERRIDE" not in ok.spec.description
@@ -239,9 +232,6 @@ def test_max_tasks_argument_cannot_widen_quota(env):
         "x", quota=quota(max_tasks_per_batch=50), max_tasks=10**6
     )
     assert r.status == "rejected" and any(e.startswith("GRID_TOO_LARGE") for e in r.errors)
-
-
-# ---- output validation -------------------------------------------------------------------
 
 
 def test_unsupported_fields_in_spec_invalid_output(env):
@@ -303,9 +293,6 @@ def test_oversized_grid_rejected_with_grid_too_large(env):
     assert time.monotonic() - t0 < 2
     assert r.status == "rejected" and r.decision is not None
     assert r.decision.violations[0].code == "GRID_TOO_LARGE" and r.decision.task_count == 400
-
-
-# ---- budgets, timeouts, provider failures ----------------------------------------------
 
 
 def test_sleeping_provider_times_out_within_budget(env):

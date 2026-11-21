@@ -35,7 +35,7 @@ class ApiKeyAuthenticator:
         if not presented:
             raise Unauthorized("missing X-API-Key header")
         match: str | None = None
-        for key, user in self._keys:  # constant-time compare against every key
+        for key, user in self._keys:
             if hmac.compare_digest(key.encode(), presented.encode()):
                 match = user
         if match is None:

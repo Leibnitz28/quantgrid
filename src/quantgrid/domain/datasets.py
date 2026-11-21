@@ -1,53 +1,9 @@
 """Recorded synthetic datasets with verifiable content signatures.
 
-Every dataset QuantGrid runs on is *recorded*: a registry entry in
-:data:`DATASET_DEFINITIONS` pins the generator, every generator parameter (including the
-seed) and the GOLDEN logical SHA-256 of the bars it produces. Workers materialise the bars
-to Parquet once and recompute the logical hash on every load, so a task can never silently
-run on different data (``DATA_INTEGRITY_ERROR`` instead).
-
-Generator (``generator_version`` 1)
------------------------------------
-For a definition with ``n_grid`` bars, ``bar_interval_s`` and ``seed``:
-
-* ``dt = bar_interval_s / (365.25 * 86400)`` (years) and
-  ``rng = numpy.random.default_rng(seed)``.
-* Shocks: ``e_x = rng.standard_normal(n_grid)`` is drawn first, then
-  ``e_2 = rng.standard_normal(n_grid)`` (spread shocks for ``cointegrated_ou``, ``log y``
-  shocks for the ``independent_rw`` control). Element 0 of each is drawn but unused, because
-  bar 0 is the fixed initial state.
-* ``log x`` is a random walk with drift: ``lx[0] = ln 100`` and
-  ``lx[t] = lx[t-1] + (mu_x*dt + sigma_x*sqrt(dt)*e_x[t])`` (strictly sequential sums).
-* ``cointegrated_ou``: the spread is an Ornstein-Uhlenbeck process, ``s[0] = 0`` and
-  ``s[t] = s[t-1] - theta*s[t-1]*dt + sigma_s*sqrt(dt)*e_2[t]`` with
-  ``theta = ln 2 / half_life_years``; then ``ly = alpha_true + beta_true*lx + s``.
-* ``independent_rw`` (negative control): ``ly[0] = ln 100 + y_log_offset`` and
-  ``ly[t] = ly[t-1] + (mu_y*dt + sigma_y*sqrt(dt)*e_2[t])``. Here y is independent of x, so
-  any "edge" a pairs strategy shows on this dataset is noise.
-* ``close = numpy.round(exp(l), price_decimals)`` using ``math.exp`` and ``price_decimals = 6``.
-  The 1e-6 price tick (at most 5e-7 absolute, about 5e-9 relative) is far below any
-  modelled effect. It makes the recorded signature robust to last-ulp differences between
-  ``exp`` implementations: numpy's AVX-512 ``exp`` differs from glibc in about 5% of
-  inputs, and without the tick the golden hash would depend on the worker's CPU or libm.
-* Timestamps form a regular UTC grid, ``start + k*bar_interval_s`` (int64 nanoseconds).
-* Optional deterministic gaps: ``default_rng(seed + 1).random(n_grid) < gap_fraction`` marks
-  bars to drop. The first and last bar are always kept. The latent process keeps evolving
-  through a gap, so the next observed bar carries the accumulated move, as with a real
-  missing bar.
-
-Parameter choices (documented so that the z-score strategy actually trades): the OU
-half-lives are tens of bars (10 days on daily bars, 2 days on hourly bars, 2 hours on
-one-minute bars, 1 day on the gappy hourly set). Typical lookbacks of 20-200 bars
-therefore see many mean-reversion cycles, and the stationary spread standard deviation
-``sigma_s / sqrt(2*theta)`` is 1-3.5% of price, well above the default 1.5 bps cost.
-
-Logical content hash
---------------------
-:func:`dataset_content_sha256` hashes a canonical byte layout: the canonical JSON header
-``{"columns": ["ts","close_x","close_y"], "dtypes": ["<i8","<f8","<f8"], "length": n}``,
-then ``b"\\0"``, then the raw little-endian bytes of ``ts``, ``close_x`` and ``close_y`` in
-that order. It does not depend on the Parquet encoding (compression, row groups, writer
-version).
+Each registry entry in DATASET_DEFINITIONS pins the generator, its parameters (including
+the seed) and the logical SHA-256 of the bars. Loads recompute that hash, so a task cannot
+silently run on different data. Changing generator arithmetic or op order breaks every
+recorded hash. Generator spec and hash layout: docs/datasets.md.
 """
 
 from __future__ import annotations
@@ -86,8 +42,7 @@ DATASET_LICENSE: Final = (
 )
 #: Year convention shared by the generator (``dt``) and the metrics (periods per year).
 SECONDS_PER_YEAR: Final = 365.25 * 86400.0
-#: ``math.log(100.0)`` and ``math.log(2.0)`` as literals, so the generator's scalar
-#: constants never depend on the platform libm (a test pins them to ``math.log``).
+#: ``math.log(100.0)`` and ``math.log(2.0)`` as literals so they do not depend on the libm.
 LN_100: Final = 4.605170185988092
 LN_2: Final = 0.6931471805599453
 PRICE_DECIMALS: Final = 6
@@ -101,18 +56,9 @@ _NS_PER_S: Final = 1_000_000_000
 _EPOCH: Final = datetime(1970, 1, 1, tzinfo=UTC)
 
 
-# --------------------------------------------------------------------------------------
-# Registry
-# --------------------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class CointegratedOU:
-    """``ly = alpha_true + beta_true*lx + s`` where ``s`` is an OU process.
-
-    ``half_life_s`` is the spread half-life in seconds (``theta = ln 2 / half_life_years``);
-    ``sigma_s`` is the annualised spread volatility.
-    """
+    """``ly = alpha_true + beta_true*lx + s`` with ``s`` an OU process (half-life in seconds)."""
 
     kind: ClassVar[str] = "cointegrated_ou"
 
@@ -152,8 +98,7 @@ class IndependentRandomWalk:
 
 @dataclass(frozen=True)
 class DatasetDefinition:
-    """One recorded synthetic dataset. All fields feed the generator and are reported in
-    :attr:`DatasetInfo.generator`, except ``golden_sha256``, which pins the output."""
+    """One recorded dataset. Every field except ``golden_sha256`` feeds the generator."""
 
     name: str
     description: str
@@ -192,7 +137,7 @@ class DatasetDefinition:
         return (delta.days * 86_400 + delta.seconds) * _NS_PER_S + delta.microseconds * 1_000
 
     def generator_params(self) -> dict[str, Any]:
-        """Every input of the generator (JSON-serialisable; reported in the catalog)."""
+        """Every generator input, JSON-serialisable."""
         return {
             "generator": GENERATOR_NAME,
             "generator_version": GENERATOR_VERSION,
@@ -210,7 +155,7 @@ class DatasetDefinition:
         }
 
     def keep_mask(self) -> np.ndarray[Any, np.dtype[np.bool_]] | None:
-        """Bars kept after deterministic gap removal (``None`` = no gaps)."""
+        """Mask of bars kept after gap removal, or ``None`` when there are no gaps."""
         if self.gap_fraction <= 0.0:
             return None
         drop = np.random.default_rng(self.seed + 1).random(self.n_grid) < self.gap_fraction
@@ -219,7 +164,7 @@ class DatasetDefinition:
         return ~drop
 
     def timestamps(self) -> IntArray:
-        """Observed bar timestamps (int64 ns UTC), after gap removal."""
+        """Observed timestamps (int64 ns UTC) after gap removal."""
         step = np.int64(self.bar_interval_s * _NS_PER_S)
         grid = np.int64(self.start_ns) + np.arange(self.n_grid, dtype=np.int64) * step
         keep = self.keep_mask()
@@ -339,7 +284,7 @@ DATASET_DEFINITIONS: Final[Mapping[str, DatasetDefinition]] = MappingProxyType(
 
 
 def get_definition(name: str) -> DatasetDefinition:
-    """Registry lookup; unknown names raise :class:`DataIntegrityError`."""
+    """Registry lookup; raises :class:`DataIntegrityError` for unknown names."""
     defn = DATASET_DEFINITIONS.get(name)
     if defn is None:
         raise DataIntegrityError(
@@ -349,32 +294,24 @@ def get_definition(name: str) -> DatasetDefinition:
 
 
 def dataset_ref(name: str) -> DatasetRef:
-    """The :class:`DatasetRef` (name + golden signature) of a registered dataset."""
     return get_definition(name).ref()
 
 
 def ns_to_datetime(ns: int) -> datetime:
-    """int64 ns since the epoch -> aware UTC datetime (microsecond precision)."""
     seconds, rem = divmod(ns, _NS_PER_S)
     return _EPOCH + timedelta(seconds=seconds, microseconds=rem // 1_000)
 
 
-# --------------------------------------------------------------------------------------
-# Generator
-# --------------------------------------------------------------------------------------
-
-
 def _random_walk(level0: float, drift: float, vol: float, shocks: FloatArray) -> FloatArray:
-    """``l[0] = level0``, ``l[t] = l[t-1] + (drift + vol*shocks[t])`` (sequential sums)."""
+    """``l[0] = level0``, ``l[t] = l[t-1] + (drift + vol*shocks[t])``."""
     increments = drift + vol * shocks
     increments[0] = level0
-    # numpy's add.accumulate is a strictly sequential left-to-right loop (no pairwise
-    # reassociation), so this equals the explicit recursion bit for bit.
+    # cumsum accumulates strictly left to right, so it matches the explicit recursion bit for bit.
     return np.cumsum(increments)
 
 
 def _ou_path(theta: float, dt: float, vol: float, shocks: FloatArray) -> FloatArray:
-    """``s[0] = 0``, ``s[t] = s[t-1] - theta*s[t-1]*dt + vol*shocks[t]`` (exact op order)."""
+    """``s[0] = 0``, ``s[t] = s[t-1] - theta*s[t-1]*dt + vol*shocks[t]``; keep the op order."""
     scaled = (vol * shocks).tolist()
     out = [0.0] * len(scaled)
     s = 0.0
@@ -392,7 +329,7 @@ def _quantised_exp(log_prices: FloatArray, decimals: int) -> FloatArray:
 
 
 def generate_arrays(defn: DatasetDefinition) -> tuple[IntArray, FloatArray, FloatArray]:
-    """Run the deterministic generator (see module docstring). Pure function of ``defn``."""
+    """Run the deterministic generator (docs/datasets.md). Pure function of ``defn``."""
     n = defn.n_grid
     dt = defn.bar_interval_s / SECONDS_PER_YEAR
     sqrt_dt = math.sqrt(dt)
@@ -418,11 +355,7 @@ def generate_arrays(defn: DatasetDefinition) -> tuple[IntArray, FloatArray, Floa
 
 
 def generate_bars(name: str, *, verify: bool = True) -> Bars:
-    """Generate a registered dataset in memory (no files).
-
-    With ``verify`` (default) the logical hash must equal the recorded golden signature,
-    else :class:`DataIntegrityError`. The returned arrays are read-only.
-    """
+    """Generate a registered dataset in memory. With ``verify``, check the golden hash."""
     defn = get_definition(name)
     ts, close_x, close_y = generate_arrays(defn)
     validate_bars(ts, close_x, close_y)
@@ -442,11 +375,6 @@ def _make_bars(name: str, ts: IntArray, close_x: FloatArray, close_y: FloatArray
     return Bars(name=name, ts=ts, close_x=close_x, close_y=close_y, sha256=sha)
 
 
-# --------------------------------------------------------------------------------------
-# Content hash and validation
-# --------------------------------------------------------------------------------------
-
-
 def _check_layout(ts: IntArray, close_x: FloatArray, close_y: FloatArray) -> int:
     for label, arr, dtype in (("ts", ts, np.int64), ("close_x", close_x, np.float64),
                               ("close_y", close_y, np.float64)):  # fmt: skip
@@ -464,11 +392,7 @@ def _check_layout(ts: IntArray, close_x: FloatArray, close_y: FloatArray) -> int
 
 
 def dataset_content_sha256(ts: IntArray, close_x: FloatArray, close_y: FloatArray) -> str:
-    """Logical SHA-256 of a bar set (see module docstring; independent of Parquet encoding).
-
-    Requires 1-D ``int64``/``float64``/``float64`` arrays of equal length
-    (:class:`DataIntegrityError` otherwise). Byte order is normalised to little-endian.
-    """
+    """Logical SHA-256 of a bar set (layout in docs/datasets.md)."""
     n = _check_layout(ts, close_x, close_y)
     header = canonical_json({"columns": list(BAR_COLUMNS), "dtypes": list(BAR_DTYPES), "length": n})
     digest = hashlib.sha256()
@@ -480,11 +404,7 @@ def dataset_content_sha256(ts: IntArray, close_x: FloatArray, close_y: FloatArra
 
 
 def validate_bars(ts: IntArray, close_x: FloatArray, close_y: FloatArray) -> None:
-    """Raise :class:`DataIntegrityError` unless the bars are usable by the engine.
-
-    Invariants: 1-D, equal non-zero length; ``ts`` int64 and strictly increasing (no
-    duplicates); prices float64, finite and strictly positive.
-    """
+    """Raise unless bars are non-empty, strictly time-ordered, finite and positive."""
     n = _check_layout(ts, close_x, close_y)
     if n == 0:
         raise DataIntegrityError("dataset is empty")
@@ -512,13 +432,8 @@ def validate_bars(ts: IntArray, close_x: FloatArray, close_y: FloatArray) -> Non
             )
 
 
-# --------------------------------------------------------------------------------------
-# Catalog
-# --------------------------------------------------------------------------------------
-
-
 class Catalog:
-    """Read-only dataset catalog (implements :class:`quantgrid.domain.policy.DatasetCatalog`)."""
+    """Read-only dataset catalog; implements ``policy.DatasetCatalog``."""
 
     def __init__(self, definitions: Mapping[str, DatasetDefinition] | None = None) -> None:
         defs = DATASET_DEFINITIONS if definitions is None else definitions
@@ -533,13 +448,8 @@ class Catalog:
 
 @cache
 def get_catalog() -> Catalog:
-    """Process-wide catalog built from :data:`DATASET_DEFINITIONS` (cached)."""
+    """Process-wide cached catalog."""
     return Catalog()
-
-
-# --------------------------------------------------------------------------------------
-# Parquet materialisation and loading
-# --------------------------------------------------------------------------------------
 
 
 def dataset_path(name: str, data_dir: Path) -> Path:
@@ -568,7 +478,7 @@ def _fsync_dir(directory: Path) -> None:
 def _write_parquet_atomic(
     path: Path, ts: IntArray, close_x: FloatArray, close_y: FloatArray, metadata: dict[bytes, bytes]
 ) -> None:
-    """Write via temp file in the same directory, fsync, ``os.replace``, fsync directory."""
+    """Temp file in the same directory, fsync, ``os.replace``, fsync the directory."""
     import pyarrow as pa
     import pyarrow.parquet as pq
 
@@ -608,7 +518,7 @@ def _expected_schema() -> Any:
 
 
 def _read_parquet(path: Path) -> tuple[IntArray, FloatArray, FloatArray, dict[bytes, bytes]]:
-    """Read and structurally check a bars file (any failure -> DataIntegrityError)."""
+    """Read a bars file; any failure raises DataIntegrityError."""
     import pyarrow as pa
     import pyarrow.parquet as pq
 
@@ -656,13 +566,10 @@ def _verified_bars(path: Path, defn: DatasetDefinition, *, verify: bool) -> Bars
 
 
 def materialize(name: str, data_dir: Path) -> Path:
-    """Ensure ``data_dir/datasets/<name>.parquet`` exists and holds the recorded bars.
+    """Ensure ``data_dir/datasets/<name>.parquet`` holds the recorded bars.
 
-    Idempotent: a valid existing file is verified (logical hash) and left untouched. A
-    missing or invalid file is (re)generated, its logical hash checked against the golden
-    signature *before* anything is written, then published atomically (temp file in the
-    same directory, flush + fsync, ``os.replace``, directory fsync). Concurrent writers are
-    safe: each writes its own temp file and the replace is atomic.
+    A valid file is left alone. Otherwise the bars are regenerated, checked against the
+    golden hash before anything is written, and published atomically.
     """
     defn = get_definition(name)
     path = dataset_path(name, data_dir)
@@ -698,13 +605,11 @@ def materialize(name: str, data_dir: Path) -> Path:
 def load_bars(
     ref: DatasetRef, data_dir: Path, *, auto_materialize: bool, verify: bool = True
 ) -> Bars:
-    """Load recorded bars for ``ref`` and prove they are the recorded content.
+    """Load bars for ``ref`` and check them against the registry.
 
-    Raises :class:`DataIntegrityError` (non-retryable) when the dataset is unknown,
-    ``ref.sha256`` differs from the registry's golden signature, the file is missing and
-    ``auto_materialize`` is false, the file is unreadable or has the wrong schema, the bars
-    fail :func:`validate_bars`, or (with ``verify``) the recomputed logical hash differs
-    from the golden signature. Returned arrays are read-only, so cached bars can be shared.
+    Raises :class:`DataIntegrityError` for an unknown dataset, a signature mismatch, a
+    missing file without ``auto_materialize``, an unreadable file or invalid bars. Returned
+    arrays are read-only.
     """
     defn = get_definition(ref.name)
     if ref.sha256 != defn.golden_sha256:
@@ -725,12 +630,10 @@ def load_bars(
 
 
 class BarsCache:
-    """Thread-safe in-process LRU of loaded :class:`Bars`, keyed by logical SHA-256.
+    """Thread-safe LRU of loaded bars keyed by logical SHA-256, with single-flight loads.
 
-    Workers run many tasks on the same few datasets, so this avoids re-reading and
-    re-hashing. Loads of the same key are single-flight (one thread loads, the others
-    wait). Cached arrays are read-only. A hit whose cached name differs from the requested
-    name is treated as a miss, so :func:`load_bars` still rejects a mismatched ref.
+    A hit whose cached name differs from the requested name counts as a miss, so
+    :func:`load_bars` still rejects a mismatched ref.
     """
 
     def __init__(self, capacity: int = 4) -> None:

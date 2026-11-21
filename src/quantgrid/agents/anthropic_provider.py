@@ -1,25 +1,11 @@
-"""Optional real provider backed by the Anthropic Messages API (SDK 2.10, API 2026-10-21).
+"""Optional provider backed by the Anthropic Messages API; the SDK is imported lazily.
 
-Configured only via environment: ``QG_LLM_MODEL`` (default ``claude-opus-5-5``),
-``QG_LLM_EFFORT``, ``QG_LLM_TIMEOUT_S``; the SDK itself reads ``ANTHROPIC_API_KEY``.
-The module imports without ``anthropic`` installed; the SDK is imported lazily.
-
-Request shape (introspected from the installed SDK, ``client.beta.messages.create``):
-one non-streaming call per step with ``max_tokens=16000``, ``system``, ``messages``,
-``tools`` (name/description/input_schema), ``output_config={"effort": ...}``,
-``betas=["server-side-fallback-2026-07-01"]`` and ``fallbacks="default"``.
-
-Server-side refusal fallback: with the fallback beta enabled the API may transparently
-retry a refused request on a fallback model and return a ``fallback`` content block
-marking the switch. Echo rule when sending that assistant turn back: drop ``thinking`` /
-``redacted_thinking`` / ``tool_use`` blocks that appear BEFORE the last ``fallback``
-block (they belong to the abandoned model) and keep the ``fallback`` block in place.
-Otherwise ``response.content`` is appended unchanged (thinking blocks included).
-
-Deliberately NOT sent: ``temperature``/``top_p``/``top_k`` (rejected on this API
-version), ``thinking`` (adaptive thinking is the default) and ``tool_choice`` (forced
-choice returns 400 on claude-opus-5-5). The model's tool calls and text are untrusted
-and are only ever returned to the orchestrator, never executed here.
+Configured by ``QG_LLM_MODEL``, ``QG_LLM_EFFORT``, ``QG_LLM_TIMEOUT_S`` and ``ANTHROPIC_API_KEY``.
+One non-streaming ``client.beta.messages.create`` call per step. With the server-side
+fallback beta the API may retry a refused request on another model and return a
+``fallback`` block; when echoing that turn, drop ``thinking``/``redacted_thinking``/``tool_use``
+blocks before the last ``fallback`` block. Do not send ``temperature``/``top_p``/``top_k``,
+``thinking`` or ``tool_choice`` (rejected or 400). Model output is untrusted and never executed.
 """
 
 from __future__ import annotations
@@ -53,7 +39,7 @@ def _bget(block: Any, key: str, default: Any = None) -> Any:
 
 
 def echo_content(content: list[Any]) -> list[Any]:
-    """Blocks to send back as the assistant turn (see module docstring for the rule)."""
+    """Blocks to echo as the assistant turn (fallback rule in the module docstring)."""
     last_fb = -1
     for i, block in enumerate(content):
         if _btype(block) == "fallback":
@@ -122,7 +108,7 @@ class _AnthropicSession:
             u = getattr(resp, "usage", None)
             usage["input_tokens"] += int(getattr(u, "input_tokens", 0) or 0)
             usage["output_tokens"] += int(getattr(u, "output_tokens", 0) or 0)
-            stop = resp.stop_reason  # check BEFORE touching content
+            stop = resp.stop_reason  # check before touching content
             if stop == "refusal":
                 details = getattr(resp, "stop_details", None)
                 category = getattr(details, "category", None)
@@ -172,7 +158,7 @@ class AnthropicProvider:
         self.effort = effort
         self.timeout_s = timeout_s
         if sdk is None:
-            import anthropic as sdk  # lazy: optional dependency
+            import anthropic as sdk
         self._sdk = sdk
 
     @classmethod
@@ -184,7 +170,7 @@ class AnthropicProvider:
                 "unavailable", "the 'anthropic' package is not installed (optional extra)"
             ) from exc
         try:
-            client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY itself
+            client = anthropic.Anthropic()
         except anthropic.AnthropicError as exc:
             raise ProviderError("unavailable", f"cannot create Anthropic client: {exc}") from exc
         return cls(

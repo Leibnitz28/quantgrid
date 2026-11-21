@@ -1,13 +1,11 @@
 """Read-only tool registry for the planner and explainer roles.
 
 Invariants:
-* Every tool is ``read_only``; the registry refuses to hold anything else, and no tool
-  here submits, cancels, modifies or deletes. There is no shell, file or network tool.
-* Each role has an explicit allowlist; a tool outside it is unreachable even if it
-  exists in the registry.
-* Arguments are untrusted: size-limited, then validated strictly against a pydantic
-  model with ``extra="forbid"``. Handler exceptions become error results; oversized
-  results are truncated with a marker.
+* Every tool is ``read_only``; the registry refuses anything else. No shell, file or
+  network tool exists.
+* Each role has an allowlist; tools outside it are unreachable.
+* Arguments are untrusted: size-limited, then validated against a pydantic model with
+  ``extra="forbid"``. Handler exceptions become error results; oversized results are truncated.
 """
 
 from __future__ import annotations
@@ -96,10 +94,9 @@ class Tool:
 
 
 class BatchReadModel(Protocol):
-    """Read-only view of batch state (plain dicts). The API wires the real one later.
+    """Read-only view of batch state (plain dicts; extra keys are ignored).
 
-    Expected shapes (extra keys are ignored):
-    ``get_progress`` -> ``{"state": str, "total": int, "counts": {STATE: int}}``;
+    ``get_progress`` -> ``{"state", "total", "counts": {STATE: int}}``;
     ``list_failed_tasks`` -> ``[{"task_id", "ordinal", "error_code", "error_message"}]``;
     ``get_task_attempts`` -> ``[{"attempt", "status", "error_code", "worker_id"}]``.
     """
@@ -112,7 +109,7 @@ class BatchReadModel(Protocol):
 
 
 class ToolRegistry:
-    """A set of read-only tools plus a per-role allowlist."""
+    """Read-only tools plus a per-role allowlist."""
 
     def __init__(self, tools: Sequence[Tool], allowlists: Mapping[Role, frozenset[str]]) -> None:
         self._tools: dict[str, Tool] = {}
@@ -145,7 +142,7 @@ class ToolRegistry:
         return out
 
     def invoke(self, role: Role, name: str, raw_args: Any, *, call_id: str = "") -> ToolResult:
-        """Run one tool call. Never raises; a rejected call is an error result."""
+        """Run one tool call; a rejected call is an error result, never an exception."""
 
         def fail(msg: str) -> ToolResult:
             return ToolResult(call_id=call_id, ok=False, error=msg)
@@ -181,18 +178,13 @@ class ToolRegistry:
         return ToolResult(call_id=call_id, ok=True, content=content)
 
 
-# --------------------------------------------------------------------------------------
-# Planner tools
-# --------------------------------------------------------------------------------------
-
-
 def _dataset_dict(info: Any) -> dict[str, Any]:
     dumped: dict[str, Any] = info.model_dump(mode="json")
     return dumped
 
 
 def planner_tools(policy: PolicyService, catalog: DatasetCatalog, quota: QuotaPolicy) -> list[Tool]:
-    """Planner tools bound to one (policy, catalog, quota). Dry-run only; no persistence."""
+    """Planner tools bound to one (policy, catalog, quota); dry-run only."""
 
     def list_datasets(_: NoArgs) -> Any:
         rows = []
@@ -294,11 +286,6 @@ def build_planner_registry(
     policy: PolicyService, catalog: DatasetCatalog, quota: QuotaPolicy
 ) -> ToolRegistry:
     return ToolRegistry(planner_tools(policy, catalog, quota), {"planner": PLANNER_TOOLS})
-
-
-# --------------------------------------------------------------------------------------
-# Explainer tools
-# --------------------------------------------------------------------------------------
 
 
 def explainer_tools(read_model: BatchReadModel) -> list[Tool]:

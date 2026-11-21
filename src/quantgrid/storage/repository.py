@@ -1,26 +1,13 @@
-"""Transactional scheduler operations - the ONLY code that changes scheduler state.
+"""Transactional scheduler operations; the only code that changes scheduler state.
 
-Correctness model (see docs/CORRECTNESS.md for the full argument):
-
-* PostgreSQL is the single source of truth. Celery/Redis messages are only *wake-up
-  tokens* ("task X may be claimable"); losing or duplicating one is harmless.
-* Every state change is one short transaction using conditional updates
-  (``UPDATE ... WHERE state IN (...)``) or an explicit row lock at READ COMMITTED, so
-  concurrent claimers/finalizers serialise on the task row. Explicit locks are
-  ``FOR NO KEY UPDATE`` (never plain ``FOR UPDATE``): we never modify key columns, and
-  the weaker lock stays compatible with the ``FOR KEY SHARE`` locks taken by foreign-key
-  checks. (With ``FOR UPDATE`` on the batch row, cancel and publish deadlocked - found by
-  ``test_cancel_vs_publish_race_is_consistent``.) Lock order is always batch -> task.
-* A lease is identified by ``(task_id, lease_owner, attempts)``. ``attempts`` acts as a
-  fencing token: a worker may heartbeat, publish or fail a task only while the row is
-  RUNNING with *its* owner id and *its* attempt number. Only the coordinator's
-  reconciler takes an expired lease away (RUNNING -> RETRY_PENDING/FAILED/CANCELED), so a
-  stalled worker that resumes ("zombie") finds the fence changed and cannot publish.
-* Publication = inserting the single ``result_artifacts`` row (``task_id`` UNIQUE) and
-  moving the task to SUCCEEDED in the same transaction. Execution is at-least-once;
-  the *effect* (one published result per task) happens at most once.
-* All lease arithmetic uses the database clock (``now()``), never worker clocks.
-* Database triggers independently enforce the state machines and log transitions.
+Rules (full argument in docs/correctness.md):
+* PostgreSQL is the source of truth. Celery/Redis messages are wake-up hints only.
+* A lease is fenced by ``(task_id, lease_owner, attempts)``; only the reconciler
+  takes one away.
+* Explicit row locks are ``FOR NO KEY UPDATE``: plain ``FOR UPDATE`` on the batch row
+  deadlocks cancel against publish via foreign-key ``FOR KEY SHARE`` locks.
+  Lock order is batch -> task.
+* Lease arithmetic uses the database clock (``now()``), never worker clocks.
 """
 
 from __future__ import annotations
@@ -68,11 +55,6 @@ def _truncate(message: str | None, limit: int = MAX_ERROR_MESSAGE) -> str | None
     return message if len(message) <= limit else message[: limit - 3] + "..."
 
 
-# =======================================================================================
-# Batch creation (idempotent)
-# =======================================================================================
-
-
 @dataclass(frozen=True)
 class CreateBatchResult:
     batch_id: uuid.UUID
@@ -94,16 +76,11 @@ def create_batch(
     request_id: str | None = None,
     reproduces_batch_id: uuid.UUID | None = None,
 ) -> CreateBatchResult:
-    """Persist a batch and all its child tasks atomically, idempotently per
-    ``(user_id, idempotency_key)``.
+    """Insert a batch and its tasks atomically, idempotent per ``(user_id, idempotency_key)``.
 
-    * New key -> batch + tasks inserted in one transaction, coordinator notified.
-    * Same key and same ``spec_sha`` -> the existing batch is returned (``created=False``).
-    * Same key, different spec -> :class:`Conflict` (the key is bound to its first spec).
-
-    Concurrent submissions with the same key are serialised by the unique index: the
-    loser's ``INSERT ... ON CONFLICT DO NOTHING`` waits for the winner and then returns
-    no row, so exactly one logical batch exists.
+    Same key and spec returns the existing batch (``created=False``); same key with a
+    different spec raises :class:`Conflict`. Concurrent submits are serialised by the
+    unique index (``ON CONFLICT DO NOTHING`` waits for the winner).
     """
     if not tasks_expanded:
         raise ValueError("a batch needs at least one task")
@@ -228,11 +205,6 @@ def active_batch_count(engine: Engine, user_id: str) -> int:
         )
 
 
-# =======================================================================================
-# Dispatch (coordinator): bounded in-flight window of wake-up messages
-# =======================================================================================
-
-
 @dataclass(frozen=True)
 class DispatchItem:
     task_id: uuid.UUID
@@ -267,11 +239,9 @@ def dispatch_ready(
 ) -> list[DispatchItem]:
     """Mark up to ``window - outstanding`` eligible tasks as enqueued and return them.
 
-    The caller sends one broker message per item *after* this transaction commits. If
-    the process dies in between, the tasks look enqueued but no message exists; they
-    are re-dispatched after ``lost_after_s`` (``redelivery=True``). Duplicate messages
-    are harmless because claiming is conditional. ``FOR NO KEY UPDATE SKIP LOCKED`` keeps two
-    dispatchers from picking the same rows.
+    The caller sends the broker messages after commit. If it dies first, the tasks are
+    re-dispatched after ``lost_after_s`` (``redelivery=True``); duplicates are harmless
+    because claiming is conditional.
     """
     with transaction(engine) as conn:
         free = min(limit, window - outstanding_dispatches(conn, lost_after_s))
@@ -309,11 +279,6 @@ def dispatch_ready(
     ]
 
 
-# =======================================================================================
-# Claim / heartbeat / finalize / fail (workers)
-# =======================================================================================
-
-
 class ClaimOutcome(StrEnum):
     CLAIMED = "CLAIMED"
     NOT_FOUND = "NOT_FOUND"
@@ -349,11 +314,9 @@ def claim_task(
     env_sha: str | None = None,
     trace_id: str | None = None,
 ) -> tuple[ClaimOutcome, ClaimedTask | None]:
-    """Atomically take a lease on a claimable task and open a new attempt.
+    """Take a lease on a claimable task and open a new attempt.
 
-    The conditional UPDATE re-checks the row after acquiring its lock, so if several
-    workers race for the same task exactly one succeeds; the others get a non-CLAIMED
-    outcome and simply drop their wake-up message.
+    Of several racing workers exactly one gets CLAIMED; the others get another outcome.
     """
     tid = _uuid(task_id)
     with transaction(engine) as conn:
@@ -462,12 +425,10 @@ def heartbeat(
     resource_profile: Mapping[str, Any],
     state: str = "ACTIVE",
 ) -> dict[uuid.UUID, LeaseStatus]:
-    """Upsert the worker heartbeat and extend the leases this worker still holds.
+    """Upsert the worker heartbeat and extend leases whose fence still matches.
 
-    A lease is extended only where ``(state, lease_owner, attempts)`` still matches, i.e.
-    the coordinator has not reclaimed it. An owner may revive its own lease after the
-    expiry time as long as it was not reclaimed - safe, because reassignment only happens
-    through the reconciler's atomic transition. Returns the status per in-flight task.
+    A lease past its expiry can still be extended until the reconciler reclaims it.
+    Returns the status per in-flight task.
     """
     with transaction(engine) as conn:
         conn.execute(
@@ -598,8 +559,7 @@ def _owns(row: RowMapping, worker_id: str, attempt: int) -> bool:
 def _record_late_completion(
     conn: Connection, task_id: uuid.UUID, attempt: int, output_sha: str, stats: AttemptStats
 ) -> FinalizeResult:
-    """A worker finished after losing its lease: keep its checksum for comparison but
-    never publish. Flags ``tasks.checksum_mismatch`` if it differs from the published one."""
+    """Late finish after losing the lease: never publish; flag a checksum mismatch."""
     conn.execute(
         text(
             """
@@ -641,11 +601,9 @@ def finalize_success(
     env_sha: str,
     cached_from_task_id: uuid.UUID | None = None,
 ) -> FinalizeResult:
-    """Publish the task's single result (the artifact bytes are already durably committed
-    to content-addressed storage by the caller).
+    """Publish the task's single result; artifact bytes must already be committed.
 
-    Holds the task row lock for the whole decision, so it serialises against cancel,
-    the reconciler and any other attempt of the same task.
+    Holds the task row lock, so it serialises against cancel, the reconciler and other attempts.
     """
     tid = _uuid(task_id)
     with transaction(engine) as conn:
@@ -829,8 +787,10 @@ def record_failure(
     stats: AttemptStats | None = None,
     backoff_s: float = 0.0,
 ) -> FailureOutcome:
-    """Close a failed attempt and schedule a retry (if retryable and attempts remain)
-    or fail the task permanently. A worker that no longer owns the lease changes nothing."""
+    """Close a failed attempt; retry if retryable and attempts remain, else fail the task.
+
+    A worker that no longer owns the lease changes nothing.
+    """
     tid = _uuid(task_id)
     with transaction(engine) as conn:
         set_actor(conn, f"worker:{worker_id}", f"attempt {attempt} failed: {error_code}")
@@ -921,8 +881,7 @@ def release_lease(
     reason: str,
     stats: AttemptStats | None = None,
 ) -> FailureOutcome | None:
-    """Give a lease back early (worker shutting down mid-task) instead of waiting for
-    expiry. Same outcome rules as lease reclamation."""
+    """Give a lease back early on shutdown instead of waiting for expiry."""
     tid = _uuid(task_id)
     with transaction(engine) as conn:
         set_actor(conn, f"worker:{worker_id}", f"lease released: {reason}")
@@ -969,11 +928,6 @@ def _after_lost_attempt(conn: Connection, task_id: uuid.UUID, row: RowMapping) -
     return FailureOutcome.FAILED
 
 
-# =======================================================================================
-# Reconciliation (coordinator)
-# =======================================================================================
-
-
 @dataclass(frozen=True)
 class ReclaimedLease:
     task_id: uuid.UUID
@@ -985,12 +939,11 @@ class ReclaimedLease:
 
 
 def reconcile_expired_leases(engine: Engine, *, limit: int = 500) -> list[ReclaimedLease]:
-    """Reclaim RUNNING tasks whose lease expired (worker crashed, was killed, or stalled).
+    """Reclaim RUNNING tasks whose lease expired.
 
-    The attempt is closed as LEASE_EXPIRED (error WORKER_LOST) and the task moves to
-    RETRY_PENDING (immediately eligible), FAILED (attempts exhausted) or CANCELED (cancel
-    pending). ``SKIP LOCKED`` avoids blocking on rows a worker is finalising right now;
-    those are picked up on the next tick if still expired.
+    The attempt closes as LEASE_EXPIRED (WORKER_LOST); the task goes to RETRY_PENDING,
+    FAILED (attempts exhausted) or CANCELED (cancel pending). ``SKIP LOCKED`` skips
+    rows a worker is finalising; they are picked up on the next tick.
     """
     reclaimed: list[ReclaimedLease] = []
     with transaction(engine) as conn:
@@ -1083,10 +1036,9 @@ class BatchStateChange:
 def refresh_batch_states(
     engine: Engine, *, batch_ids: Sequence[uuid.UUID] | None = None
 ) -> list[BatchStateChange]:
-    """Recompute the state of non-terminal batches from their task counts.
+    """Recompute non-terminal batch states from task counts.
 
-    Batch rows are updated by this periodic pass (not on every task completion) so that
-    workers never contend on the batch row.
+    Done periodically rather than per completion so workers never contend on the batch row.
     """
     changes: list[BatchStateChange] = []
     with transaction(engine) as conn:
@@ -1149,11 +1101,6 @@ def refresh_batch_states(
     return changes
 
 
-# =======================================================================================
-# Cancel / retry-failed (API)
-# =======================================================================================
-
-
 @dataclass
 class CancelReport:
     batch_id: uuid.UUID
@@ -1194,11 +1141,9 @@ def cancel_batch(
 ) -> CancelReport:
     """Cooperative cancellation.
 
-    Waiting tasks (PENDING/RETRY_PENDING) become CANCELED immediately; RUNNING tasks get
-    ``cancel_requested`` and are stopped by their worker at the next heartbeat or at
-    publish time (whichever comes first). Completed results are kept and reported. The
-    task row locks make cancel and publish mutually exclusive, so a task is either
-    reported as completed here or can never publish afterwards.
+    PENDING/RETRY_PENDING tasks become CANCELED; RUNNING tasks get ``cancel_requested``
+    and stop at the next heartbeat or publish. Completed results are kept. Row locks make
+    cancel and publish exclusive: a task is reported completed or can never publish.
     """
     bid = _uuid(batch_id)
     with transaction(engine) as conn:
@@ -1287,11 +1232,10 @@ def retry_failed(
     include_non_retryable: bool = False,
     actor: str = "api",
 ) -> RetryReport:
-    """Move eligible FAILED tasks back to RETRY_PENDING with ``extra_attempts`` more
-    attempts, bounded by the batch's quota snapshot (attempts and worker-seconds).
+    """Move eligible FAILED tasks to RETRY_PENDING with ``extra_attempts`` more attempts.
 
-    Eligible = FAILED with a retryable last error code (or any code when
-    ``include_non_retryable``), whose new attempt budget stays within the quota.
+    Eligible: retryable last error (any, with ``include_non_retryable``) and within the
+    batch's quota snapshot (attempts and worker-seconds).
     """
     if extra_attempts < 1:
         raise ValueError("extra_attempts must be >= 1")
@@ -1359,11 +1303,6 @@ def retry_failed(
     return RetryReport(
         bid, state, len(eligible), [r.id for r in eligible], skipped_code, skipped_quota
     )
-
-
-# =======================================================================================
-# Read models
-# =======================================================================================
 
 
 def get_batch(
@@ -1561,8 +1500,7 @@ def list_batches(
 def find_cached_result(
     engine: Engine, *, spec_hash: str, code_sha: str, env_sha: str
 ) -> dict[str, Any] | None:
-    """A previously published result for an identical task spec produced by identical
-    code and environment (the only condition under which reuse cannot change a result)."""
+    """A published result for the same spec, code and environment, safe to reuse."""
     with engine.connect() as conn:
         row = (
             conn.execute(

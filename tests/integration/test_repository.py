@@ -68,9 +68,6 @@ def task_row(engine: Engine, tid: uuid.UUID) -> dict:
     return repo.get_task_detail(engine, tid)["task"]
 
 
-# ----------------------------------------------------------------------------- creation
-
-
 def test_create_batch_persists_tasks_in_order(clean_db: Engine) -> None:
     res = submit(clean_db, 5)
     assert res.created and res.task_count == 5
@@ -110,9 +107,6 @@ def test_concurrent_identical_submissions_create_one_batch(clean_db: Engine) -> 
         assert conn.execute(text("SELECT count(*) FROM tasks")).scalar_one() == 6
 
 
-# ----------------------------------------------------------------------------- dispatch
-
-
 def test_dispatch_respects_window_and_redelivers_lost_messages(clean_db: Engine) -> None:
     res = submit(clean_db, 10)
     first = repo.dispatch_ready(clean_db, window=4, lost_after_s=60)
@@ -141,9 +135,6 @@ def test_concurrent_dispatchers_never_pick_the_same_task(clean_db: Engine) -> No
         )
     picked = [i.task_id for b in batches for i in b]
     assert len(picked) == len(set(picked)) == 40
-
-
-# ----------------------------------------------------------------------------- claim
 
 
 def test_exactly_one_concurrent_claim_wins(clean_db: Engine) -> None:
@@ -183,9 +174,6 @@ def test_claim_records_queue_wait_and_attempt_row(clean_db: Engine) -> None:
     assert att["status"] == "RUNNING" and att["worker_id"] == "w1" and att["code_sha"] == CODE
 
 
-# ----------------------------------------------------------------------------- heartbeat
-
-
 def test_heartbeat_extends_lease_and_reports_lost_and_cancel(clean_db: Engine) -> None:
     res = submit(clean_db, 2)
     t1, t2 = task_ids(clean_db, res.batch_id)
@@ -217,9 +205,6 @@ def test_heartbeat_extends_lease_and_reports_lost_and_cancel(clean_db: Engine) -
     )
     live, slots = repo.live_worker_capacity(clean_db, dead_after_s=30)
     assert (live, slots) == (1, 1)
-
-
-# ----------------------------------------------------------------------------- publish
 
 
 def test_publish_once_and_transitions_logged(clean_db: Engine) -> None:
@@ -290,9 +275,6 @@ def test_stalled_but_not_reclaimed_owner_may_still_publish(clean_db: Engine) -> 
     c = claim(clean_db, tid, ttl=0.1)
     time.sleep(0.3)  # lease expired, but no reconciler ran -> nobody else could claim
     assert publish(clean_db, c).outcome == FinalizeOutcome.PUBLISHED
-
-
-# ----------------------------------------------------------------------------- failures
 
 
 def test_retryable_failure_backoff_then_exhaustion(clean_db: Engine) -> None:
@@ -381,9 +363,6 @@ def test_release_lease_requeues_immediately(clean_db: Engine) -> None:
     assert claim(clean_db, tid, "w2").attempt == 2
 
 
-# ----------------------------------------------------------------------------- cancel
-
-
 def test_cancel_reports_completed_and_stops_running(clean_db: Engine) -> None:
     res = submit(clean_db, 4)
     t = task_ids(clean_db, res.batch_id)
@@ -450,9 +429,6 @@ def test_cancel_vs_publish_race_is_consistent(clean_db: Engine) -> None:
             assert report.completed_count == 0
         expected = "SUCCEEDED" if result.outcome == FinalizeOutcome.PUBLISHED else "CANCELED"
         assert task_row(clean_db, tid)["state"] == expected
-
-
-# ----------------------------------------------------------------------------- retry-failed
 
 
 def test_retry_failed_requeues_eligible_tasks_within_quota(clean_db: Engine) -> None:
@@ -529,9 +505,6 @@ def test_retry_after_cancel_conflicts(clean_db: Engine) -> None:
     repo.cancel_batch(clean_db, res.batch_id, user_id="user-1")
     with pytest.raises(Conflict):
         repo.retry_failed(clean_db, res.batch_id, user_id="user-1")
-
-
-# ----------------------------------------------------------------------------- batch state
 
 
 def test_batch_state_lifecycle(clean_db: Engine) -> None:

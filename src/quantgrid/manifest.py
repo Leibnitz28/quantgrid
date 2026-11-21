@@ -1,15 +1,13 @@
 """Reproducibility manifest: exact code, environment, dependency and dataset identity.
 
-* ``code_sha``   - SHA-256 over every ``*.py`` file of the installed ``quantgrid`` package
-  (path + bytes, sorted). Exact even for uncommitted changes, unlike a git SHA alone.
-* ``git_commit`` - informational (``git rev-parse HEAD`` / ``QG_GIT_COMMIT``) + dirty flag.
-* ``env_sha``    - SHA-256 over the interpreter version, platform/machine and the full
-  sorted list of installed distributions (``name==version``).
-* ``lockfile_sha`` - SHA-256 of ``uv.lock`` when present (dependency lock).
+* ``code_sha``: SHA-256 over every ``*.py`` of the installed package (path + bytes,
+  sorted); exact for uncommitted changes.
+* ``git_commit``: informational, plus a dirty flag.
+* ``env_sha``: SHA-256 over interpreter, platform and sorted installed distributions.
+* ``lockfile_sha``: SHA-256 of ``uv.lock`` when present.
 
-Every batch row stores the manifest of the process that admitted it; every task attempt
-records the ``code_sha``/``env_sha`` of the worker that ran it, and cached results are
-only reused when both match.
+Batches store the admitting process's manifest; attempts record ``code_sha``/``env_sha``,
+and cached results are reused only when both match.
 """
 
 from __future__ import annotations
@@ -105,8 +103,8 @@ def environment_manifest() -> dict[str, Any]:
         "byteorder": sys.byteorder,
         "packages": installed_packages(),
     }
-    # The hash deliberately excludes the kernel/platform string (varies per host
-    # patch level) but includes everything that can change numerical results.
+    # Excludes the kernel string (varies per host patch level); includes everything that
+    # can change numerical results.
     hashed = {k: v for k, v in env.items() if k != "platform"}
     env["env_sha"] = canonical_sha256(hashed)
     root = _repo_root()
@@ -120,7 +118,7 @@ def env_sha() -> str:
 
 
 def build_manifest(dataset: DatasetInfo, spec_sha: str) -> dict[str, Any]:
-    """Manifest stored on a batch row at admission time."""
+    """Manifest stored on a batch at admission."""
     env = environment_manifest()
     return {
         "manifest_version": MANIFEST_VERSION,
@@ -138,7 +136,7 @@ def build_manifest(dataset: DatasetInfo, spec_sha: str) -> dict[str, Any]:
 
 
 def manifest_drift(recorded: dict[str, Any]) -> dict[str, Any]:
-    """Compare a recorded manifest with the current process (for ``reproduce``)."""
+    """Differences between a recorded manifest and the current process."""
     current_env = environment_manifest()
     rec_env = recorded.get("environment", {})
     rec_pkgs: dict[str, str] = rec_env.get("packages", {})

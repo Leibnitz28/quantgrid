@@ -1,4 +1,4 @@
-# ADR 0004 — The database enforces the state machines and logs every transition
+# ADR 0004: The database enforces the state machines and logs every transition
 
 **Status:** accepted
 

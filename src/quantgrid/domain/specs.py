@@ -1,16 +1,10 @@
 """Typed, immutable experiment contracts.
 
-* :class:`ExperimentBatchSpec` - what a client (or the AI planner) submits: one dataset,
-  one strategy, a bounded parameter grid, seeds, split, fee model, workload and budget.
-* :class:`TaskSpec` - one immutable child task produced by deterministic grid expansion.
-  Everything that can influence a task's numerical result lives in the TaskSpec and is
-  covered by ``spec_hash`` (dataset + checksum, strategy + version, params, split, fee
-  model, seed, workload, fault injection, result schema). Execution limits (runtime /
-  memory budget, max attempts) do not change results and are stored as task columns.
-
-All models are frozen and reject unknown fields (``extra="forbid"``), so an LLM-produced
-or hand-written spec with unsupported fields fails validation instead of being silently
-ignored.
+``ExperimentBatchSpec`` is what a client or the planner submits. ``TaskSpec`` is one child
+task from deterministic grid expansion. Everything that can change a task's numerical result
+lives in the TaskSpec and is covered by ``spec_hash``; execution limits (runtime and memory
+budget, max attempts) do not change results and are stored as task columns. Models are frozen
+and reject unknown fields, so unsupported fields fail validation instead of being ignored.
 """
 
 from __future__ import annotations
@@ -56,11 +50,7 @@ class _Frozen(BaseModel):
 
 
 class DatasetRef(_Frozen):
-    """A dataset reference *plus* its expected content signature.
-
-    Clients must state the exact SHA-256 they expect; admission fails if the registry's
-    recorded signature differs (protects against silently running on different data).
-    """
+    """Dataset name plus the content SHA-256 the client expects; admission rejects a mismatch."""
 
     name: Identifier
     sha256: Sha256Hex
@@ -117,27 +107,22 @@ class SplitSpec(_Frozen):
 
 
 class FeeModel(_Frozen):
-    """Linear transaction-cost model applied to gross notional traded (both legs)."""
-
     commission_bps: float = Field(default=1.0, ge=0.0, le=100.0)
     slippage_bps: float = Field(default=0.5, ge=0.0, le=100.0)
 
 
 class WorkloadSpec(_Frozen):
-    """CPU-bound extra work per task: a stationary block bootstrap of the test-period
-    Sharpe ratio (``bootstrap_samples`` resamples, mean block length ``bootstrap_block``).
-    0 samples = a short task; thousands = a long CPU-bound task."""
+    """CPU-bound bootstrap work per task; 0 samples gives a short task."""
 
     bootstrap_samples: int = Field(default=0, ge=0, le=50_000)
     bootstrap_block: int = Field(default=20, ge=1, le=10_000)
 
 
 class FaultInjection(_Frozen):
-    """Deterministic failure injection for tests/demos (policy-gated).
+    """Failure injection for tests and demos (policy-gated).
 
-    * ``fail_on_attempts``: raise an error on these attempt numbers (1-based).
-    * ``error_kind``: ``transient`` (retryable) or ``permanent`` (non-retryable).
-    * ``sleep_s``: cooperative extra wall time per attempt (widens chaos windows).
+    ``fail_on_attempts`` are 1-based attempt numbers, ``error_kind`` is ``transient`` or
+    ``permanent``, ``sleep_s`` is extra cooperative wall time per attempt.
     """
 
     fail_on_attempts: tuple[Annotated[int, Field(ge=1, le=100)], ...] = ()
@@ -146,20 +131,11 @@ class FaultInjection(_Frozen):
 
 
 class ResourceBudget(_Frozen):
-    """Per-task execution budget (not part of ``spec_hash``)."""
-
     max_runtime_s: int = Field(default=120, ge=1, le=24 * 3600)
     max_memory_mb: int = Field(default=512, ge=64, le=65_536)
 
 
-# --------------------------------------------------------------------------------------
-# Strategy parameter schemas
-# --------------------------------------------------------------------------------------
-
-
 class PairsZScoreParams(_Frozen):
-    """Parameters of the built-in ``pairs_zscore`` v1 mean-reversion strategy."""
-
     lookback: int = Field(ge=5, le=5_000, description="rolling window (bars) for spread mean/std")
     entry_z: float = Field(gt=0.0, le=10.0, description="|z| that opens a position")
     exit_z: float = Field(ge=0.0, le=10.0, description="|z| at/below which a position closes")
@@ -176,8 +152,6 @@ class PairsZScoreParams(_Frozen):
 
 
 class GenericScalarParams(BaseModel):
-    """Permissive params model for externally registered strategies (scalars only)."""
-
     model_config = ConfigDict(frozen=True, extra="allow", allow_inf_nan=False)
 
     @model_validator(mode="before")
@@ -202,7 +176,6 @@ _STRATEGY_PARAMS: dict[tuple[str, str], type[BaseModel]] = {
 
 
 def register_strategy(name: str, version: str, params_model: type[BaseModel]) -> None:
-    """Register an additional strategy (e.g. the optional external backtester adapter)."""
     _STRATEGY_PARAMS[(name, version)] = params_model
 
 
@@ -219,14 +192,7 @@ def strategy_param_names(ref: StrategyRef) -> list[str]:
     return [] if model is None else sorted(model.model_fields)
 
 
-# --------------------------------------------------------------------------------------
-# Task and batch specs
-# --------------------------------------------------------------------------------------
-
-
 class TaskSpec(_Frozen):
-    """One immutable unit of work. ``spec_hash`` identifies it for idempotency/caching."""
-
     schema_version: Literal[1] = TASK_SPEC_SCHEMA_VERSION
     dataset: DatasetRef
     strategy: StrategyRef
@@ -252,8 +218,6 @@ class ExpandedTask(_Frozen):
 
 
 class ExperimentBatchSpec(_Frozen):
-    """A bounded parameter-sweep request. Produced by clients or the AI planner."""
-
     MAX_NAME: ClassVar[int] = 120
 
     name: Annotated[
@@ -308,10 +272,7 @@ class ExperimentBatchSpec(_Frozen):
             raise ValueError(f"params both in grid and fixed_params: {sorted(overlap)}")
         return self
 
-    # ---- derived values ---------------------------------------------------------------
-
     def task_count(self) -> int:
-        """Number of child tasks, computed without expanding the grid."""
         return math.prod(len(v) for v in self.grid.values()) * len(self.seeds)
 
     def canonical(self) -> dict[str, Any]:
@@ -322,8 +283,6 @@ class ExperimentBatchSpec(_Frozen):
 
 
 class GridExpansionError(ValueError):
-    """Raised when one or more grid points are invalid for the strategy."""
-
     def __init__(self, message: str, problems: Sequence[str]) -> None:
         super().__init__(message)
         self.problems = list(problems)
@@ -419,8 +378,6 @@ def expand_grid(
 
 
 class DatasetInfo(_Frozen):
-    """Registry entry describing a recorded (synthetic or licensed) dataset."""
-
     name: Identifier
     sha256: Sha256Hex
     n_bars: int

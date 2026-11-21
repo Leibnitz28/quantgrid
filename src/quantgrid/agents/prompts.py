@@ -1,8 +1,6 @@
 """System prompts and user-message framing.
 
-Prompts are defence in depth only: correctness never depends on the model obeying them.
-Every bound (policy quotas, strict spec validation, read-only tool allowlist, step/time
-budgets) is enforced deterministically in code.
+Prompts are not a safety boundary; every bound is enforced in code.
 """
 
 from __future__ import annotations
@@ -41,7 +39,7 @@ each starting with "- ". Do not claim anything about profitability.
 
 
 def sanitize_goal(goal: str) -> str:
-    """Neutralise the delimiter tokens so a goal cannot forge the message structure."""
+    """Neutralise delimiter tokens so a goal cannot forge the message structure."""
     return goal.replace(GOAL_OPEN, "<<GOAL").replace(GOAL_CLOSE, "GOAL>>")
 
 

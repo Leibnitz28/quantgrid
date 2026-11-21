@@ -94,8 +94,7 @@ def submit_batch(
     principal: User,
     idempotency_key: Annotated[IdempotencyKey, Header(alias="Idempotency-Key")],
 ) -> BatchAccepted:
-    """Submit a bounded experiment batch. Idempotent per ``Idempotency-Key``: repeating a
-    request returns the original batch; reusing a key for a different spec is a 409."""
+    """Submit a batch; idempotent per ``Idempotency-Key`` (same key, different spec: 409)."""
     spec_sha = spec.spec_sha()
     existing = repo.find_batch_by_key(ctx.engine, principal.user_id, idempotency_key)
     if existing is not None:
@@ -226,7 +225,7 @@ def list_batch_tasks(
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
     cursor: str | None = None,
 ) -> TaskPage:
-    repo.get_batch(ctx.engine, batch_id, user_id=principal.user_id)  # ownership / 404
+    repo.get_batch(ctx.engine, batch_id, user_id=principal.user_id)
     rows = repo.list_tasks(
         ctx.engine,
         batch_id,
@@ -257,7 +256,7 @@ def list_batch_tasks(
 
 @router.post("/batches/{batch_id}/cancel", response_model=CancelResponse)
 def cancel_batch(batch_id: uuid.UUID, ctx: Ctx, principal: User) -> CancelResponse:
-    """Cooperative cancellation; reports the items that had already completed."""
+    """Cooperative cancel; reports tasks that had already completed."""
     report = repo.cancel_batch(
         ctx.engine, batch_id, user_id=principal.user_id, actor=f"api:{principal.user_id}"
     )
@@ -281,8 +280,7 @@ def retry_failed(
     principal: User,
     body: Annotated[RetryRequest | None, Body()] = None,
 ) -> RetryResponse:
-    """Retry eligible FAILED tasks (retryable error codes unless include_non_retryable),
-    within the batch's attempt and worker-time quota."""
+    """Retry eligible FAILED tasks within the batch's attempt and worker-time quota."""
     req = body or RetryRequest()
     report = repo.retry_failed(
         ctx.engine,
@@ -310,8 +308,7 @@ def get_results(
     limit: Annotated[int, Query(ge=1, le=1000)] = 200,
     cursor: str | None = None,
 ) -> ResultsPage:
-    """Merged per-task metrics plus the reproducibility manifest. Only published
-    (immutable) results are returned; ``complete`` says whether the batch is terminal."""
+    """Merged metrics of published results plus the manifest; ``complete`` = batch is terminal."""
     from quantgrid.results.export import summarize_metrics
 
     b = repo.get_batch(ctx.engine, batch_id, user_id=principal.user_id)

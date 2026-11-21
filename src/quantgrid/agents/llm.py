@@ -1,9 +1,4 @@
-"""Provider-neutral LLM types.
-
-Everything an LLM returns (text, tool-call arguments) is *untrusted data*. These types
-carry it; nothing in this package grants it authority. Providers translate to and from
-their native wire formats and never execute anything.
-"""
+"""Provider-neutral LLM types. Everything a model returns is untrusted data."""
 
 from __future__ import annotations
 
@@ -18,7 +13,7 @@ ProviderErrorKind = Literal[
 
 @dataclass(frozen=True)
 class ToolSpec:
-    """A tool as advertised to the model (JSON Schema for its arguments)."""
+    """A tool advertised to the model."""
 
     name: str
     description: str
@@ -27,7 +22,7 @@ class ToolSpec:
 
 @dataclass(frozen=True)
 class ToolCall:
-    """A tool invocation requested by the model. ``arguments`` is untrusted."""
+    """A tool call requested by the model; ``arguments`` is untrusted."""
 
     id: str
     name: str
@@ -36,7 +31,7 @@ class ToolCall:
 
 @dataclass(frozen=True)
 class ToolResult:
-    """Outcome of a tool call. ``content`` is JSON-serialisable; ``error`` set iff not ok."""
+    """Outcome of a tool call; ``error`` is set iff not ok."""
 
     call_id: str
     ok: bool
@@ -46,7 +41,7 @@ class ToolResult:
 
 @dataclass(frozen=True)
 class ProviderTurn:
-    """One model response: either tool calls to run or a final text."""
+    """One model response: tool calls or final text."""
 
     tool_calls: tuple[ToolCall, ...] = ()
     text: str = ""
@@ -55,7 +50,7 @@ class ProviderTurn:
 
 
 class ProviderError(Exception):
-    """A typed provider failure. ``retryable`` is advisory; the runner never retries."""
+    """A typed provider failure; ``retryable`` is advisory."""
 
     def __init__(self, kind: ProviderErrorKind, message: str = "", *, retryable: bool = False):
         super().__init__(f"{kind}: {message}" if message else kind)
@@ -65,7 +60,7 @@ class ProviderError(Exception):
 
 
 class LLMSession(Protocol):
-    """A conversation. Methods may block; the runner enforces the time budget."""
+    """A conversation. Methods may block; the orchestrator enforces the time budget."""
 
     def send_user(self, text: str) -> ProviderTurn: ...
 

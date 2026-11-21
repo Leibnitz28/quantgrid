@@ -1,21 +1,10 @@
-"""DuckDB helpers for merged result tables, used by the results endpoint, CLI export and
-verifier.
+"""DuckDB helpers for merged result tables, used by the results endpoint, CLI export and verifier.
 
-Metrics rows (:class:`MetricsRow`): one per task, built by the caller from ``tasks``
-joined with ``result_artifacts``.
-
-* ``task_id`` (str or UUID), ``ordinal`` (int >= 0), ``spec_hash`` (SHA-256 hex): required.
-* ``output_sha`` (SHA-256 hex or ``None``): optional, ``None`` for tasks without a result.
-* ``params`` (the task spec's params: name -> scalar or ``None``): optional.
-* ``metrics`` (``result_artifacts.metrics``: name -> finite number or ``None``): optional.
-
-Other keys are ignored, so richer rows (e.g. with ``state``) can be passed as is. Rows
-are validated: ``task_id`` must be unique (one logical result per task), digests must
-be hex, metrics finite or ``None``. Invalid input raises ``ValueError``.
-
-Everything is deterministic. Rows are ordered by ``(ordinal, task_id)``. Columns are
-ordered ``task_id, ordinal, spec_hash, output_sha``, then ``p_<param>`` sorted, then
-``m_<metric>`` sorted. The same rows in any order give byte-identical exports.
+Each metrics row (:class:`MetricsRow`) needs ``task_id`` (unique), ``ordinal`` and
+``spec_hash``; ``output_sha``, ``params`` and ``metrics`` are optional and other keys are
+ignored. Invalid rows raise ``ValueError``. Output is deterministic: rows ordered by
+``(ordinal, task_id)``, columns ``task_id, ordinal, spec_hash, output_sha``, then sorted
+``p_<param>`` and ``m_<metric>``, so the same rows in any order export identical bytes.
 """
 
 from __future__ import annotations
@@ -52,8 +41,6 @@ _INT64_MAX: Final = 2**63 - 1
 
 
 class MetricsRow(TypedDict):
-    """Input row for :func:`export_metrics` / :func:`summarize_metrics` (see module doc)."""
-
     task_id: str | uuid.UUID
     ordinal: int
     spec_hash: str
@@ -63,9 +50,7 @@ class MetricsRow(TypedDict):
 
 
 class ArtifactScan(TypedDict):
-    """One :func:`scan_artifacts` entry. ``error`` is set (and the other fields are
-    ``None``) when the file is missing or not readable Parquet. ``spec_hash`` is
-    ``None`` for a readable file without QuantGrid metadata."""
+    """One :func:`scan_artifacts` entry; ``error`` is set when the file is missing or unreadable."""
 
     path: Path
     row_count: int | None
@@ -74,9 +59,6 @@ class ArtifactScan(TypedDict):
 
 
 class MetricsSummary(TypedDict):
-    """Result of :func:`summarize_metrics`. Statistics are ``None`` when no row has a
-    value."""
-
     key: str
     count: int
     n_with_value: int
@@ -96,8 +78,6 @@ class MetricsSummary(TypedDict):
 
 @dataclass(frozen=True, slots=True)
 class MetricsExport:
-    """Description of a written export file."""
-
     path: Path
     fmt: ExportFormat
     row_count: int
@@ -112,11 +92,6 @@ class _Row:
     output_sha: str | None
     params: dict[str, ParamValue]
     metrics: dict[str, MetricValue]
-
-
-# --------------------------------------------------------------------------------------
-# Row validation
-# --------------------------------------------------------------------------------------
 
 
 def _row_error(index: int, message: str) -> ValueError:
@@ -147,7 +122,6 @@ def _named_mapping(index: int, raw: Any, what: str) -> dict[str, Any]:
 
 
 def _normalise_rows(rows: Sequence[Mapping[str, Any]]) -> list[_Row]:
-    """Validate rows and return them sorted by ``(ordinal, task_id)``."""
     out: list[_Row] = []
     seen: dict[str, int] = {}
     for index, row in enumerate(rows):
@@ -190,11 +164,6 @@ def _normalise_rows(rows: Sequence[Mapping[str, Any]]) -> list[_Row]:
     return out
 
 
-# --------------------------------------------------------------------------------------
-# Export
-# --------------------------------------------------------------------------------------
-
-
 def _value_kind(value: ParamValue) -> str:
     if isinstance(value, bool):
         return "bool"
@@ -216,8 +185,7 @@ def _as_text(value: ParamValue) -> str | None:
 
 
 def _param_array(values: list[ParamValue]) -> pa.Array:
-    """One Arrow column from per-row param values. Types are unified: bool, int64,
-    float64 (ints mixed with floats), else text. A column with no values is text."""
+    """Arrow column of param values: bool, int64, float64 (ints mixed with floats), else text."""
     kinds = {_value_kind(v) for v in values if v is not None}
     if kinds == {"bool"}:
         return pa.array(values, type=pa.bool_())
@@ -229,7 +197,6 @@ def _param_array(values: list[ParamValue]) -> pa.Array:
 
 
 def _metric_array(values: list[MetricValue]) -> pa.Array:
-    """int64 if every present value is an int, else float64 (also when all are None)."""
     present = [v for v in values if v is not None]
     if present and all(isinstance(v, int) for v in present):
         return pa.array(values, type=pa.int64())
@@ -237,7 +204,6 @@ def _metric_array(values: list[MetricValue]) -> pa.Array:
 
 
 def metrics_table(rows: Sequence[Mapping[str, Any]]) -> pa.Table:
-    """The merged metrics table (deterministic row and column order) as Arrow."""
     normalised = _normalise_rows(rows)
     param_names = sorted({name for r in normalised for name in r.params})
     metric_names = sorted({name for r in normalised for name in r.metrics})
@@ -260,12 +226,9 @@ def metrics_table(rows: Sequence[Mapping[str, Any]]) -> pa.Table:
 def export_metrics(
     rows: Sequence[Mapping[str, Any]], out_path: Path, fmt: ExportFormat
 ) -> MetricsExport:
-    """Write the merged metrics table (one row per task) to ``out_path`` using DuckDB.
+    """Write the merged metrics table to ``out_path`` as zstd Parquet or uncompressed CSV.
 
-    ``parquet`` is zstd-compressed. ``csv`` has a header row, ``,`` delimiter, empty
-    fields for NULL, and is never compressed, whatever the file extension. The file is
-    written to a temp name in the same directory and renamed into place, so readers
-    never see a partial export. Missing parent directories are created.
+    The file is written to a temp name and renamed, so readers never see a partial export.
     """
     if fmt not in ("parquet", "csv"):
         raise ValueError(f"fmt must be 'parquet' or 'csv', got {fmt!r}")
@@ -296,11 +259,6 @@ def export_metrics(
     )
 
 
-# --------------------------------------------------------------------------------------
-# Artifact scanning
-# --------------------------------------------------------------------------------------
-
-
 def _scan_entry(
     path: Path, row_count: int | None, spec_hash: str | None, error: str | None = None
 ) -> ArtifactScan:
@@ -308,7 +266,6 @@ def _scan_entry(
 
 
 def _decode_spec_hashes(values: list[bytes]) -> tuple[str | None, str | None]:
-    """``(spec_hash, error)`` from all spec_hash metadata values found in one file."""
     distinct = sorted(set(values))
     if not distinct:
         return None, None
@@ -318,11 +275,9 @@ def _decode_spec_hashes(values: list[bytes]) -> tuple[str | None, str | None]:
 
 
 def _scan_with_duckdb(keys: list[str]) -> dict[str, ArtifactScan]:
-    """Scan readable, non-glob paths in one DuckDB query (metadata only, no data read).
+    """Scan non-glob paths in one DuckDB metadata query.
 
-    Raises ``duckdb.Error`` if any file is unreadable. Raises ``RuntimeError`` if
-    DuckDB reports file names that cannot be matched to the requested paths. A
-    single-path scan always matches.
+    Raises ``duckdb.Error`` for an unreadable file, ``RuntimeError`` if names cannot be matched.
     """
     con = duckdb.connect(":memory:")
     try:
@@ -355,7 +310,6 @@ def _scan_with_duckdb(keys: list[str]) -> dict[str, ArtifactScan]:
 
 
 def _scan_with_pyarrow(key: str) -> ArtifactScan:
-    """Fallback for paths DuckDB would glob-expand (see ``_GLOB_CHARS``)."""
     path = Path(key)
     try:
         metadata = pq.ParquetFile(path).metadata
@@ -371,12 +325,7 @@ def _scan_with_pyarrow(key: str) -> ArtifactScan:
 def scan_artifacts(paths: Sequence[Path]) -> list[ArtifactScan]:
     """Row count and embedded ``spec_hash`` of each Parquet file, in input order.
 
-    Uses DuckDB's ``parquet_file_metadata``/``parquet_kv_metadata``, which read
-    metadata only, in one query for all files. If that query fails (e.g. one corrupt
-    file), files are re-scanned one by one, so a bad file only affects its own entry
-    (``error`` set). Paths containing glob characters (``*``, ``?``, ``[``) are read with
-    pyarrow, because DuckDB would expand them as glob patterns. Duplicate input paths
-    give duplicate entries.
+    If the query fails, files are rescanned one by one so a bad file only sets its own ``error``.
     """
     keys = [str(Path(p)) for p in paths]
     results: dict[str, ArtifactScan] = {}
@@ -400,18 +349,11 @@ def scan_artifacts(paths: Sequence[Path]) -> list[ArtifactScan]:
     return [results[key] for key in keys]
 
 
-# --------------------------------------------------------------------------------------
-# Summary statistics
-# --------------------------------------------------------------------------------------
-
-
 def _mean(values: Sequence[float]) -> float | None:
-    """Exactly rounded mean (``math.fsum``), so it does not depend on input order."""
     return math.fsum(values) / len(values) if values else None
 
 
 def _quantile(sorted_values: Sequence[float], q: float) -> float | None:
-    """Linear-interpolation quantile (numpy's default, Hyndman-Fan type 7)."""
     if not sorted_values:
         return None
     h = (len(sorted_values) - 1) * q
@@ -423,15 +365,9 @@ def _quantile(sorted_values: Sequence[float], q: float) -> float | None:
 def summarize_metrics(
     rows: Sequence[Mapping[str, Any]], *, key: str = "sharpe", higher_is_better: bool = True
 ) -> MetricsSummary:
-    """Deterministic summary of one metric across tasks (pure Python).
+    """Summarise one metric across tasks: count, best and worst task, mean, p50, p95.
 
-    * ``count``: rows. ``n_with_value``: rows where ``metrics[key]`` is not ``None``.
-    * ``best_*``/``worst_*``: the task with the highest/lowest value (reversed when
-      ``higher_is_better=False``). Rows without a value are ignored. Ties go to the
-      lowest ordinal, then the lowest task_id.
-    * ``mean``/``p50``/``p95`` of the key (linear-interpolation percentiles).
-    * ``mean_total_return``/``mean_max_drawdown``/``mean_n_trades``: means over rows
-      that have the metric.
+    Rows without a value are ignored. Ties go to the lowest ordinal, then the lowest task_id.
     """
     normalised = _normalise_rows(rows)
     scored = [

@@ -1,9 +1,8 @@
 """Task, attempt and batch state machines.
 
-The task transition table below is the single source of truth. The PostgreSQL trigger
-installed by migration ``0001`` enforces the *same* table inside the database, so an
-illegal transition is rejected even if application code is wrong
-(``tests/integration/test_schema_triggers.py`` checks both tables agree).
+TASK_TRANSITIONS is the source of truth. The PostgreSQL trigger from migration ``0001``
+enforces the same table, so the two must stay in sync (checked by
+``tests/integration/test_schema_triggers.py``).
 
 Task lifecycle::
 

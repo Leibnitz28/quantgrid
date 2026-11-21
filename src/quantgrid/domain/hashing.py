@@ -1,12 +1,8 @@
 """Canonical JSON serialisation and content hashing.
 
-Every hash in QuantGrid (``spec_hash``, ``spec_sha``, ``dataset_sha``, ``output_sha``,
-``code_sha``, ``env_sha``) is a lowercase hex SHA-256 digest.
-
-Canonical JSON means: UTF-8, keys sorted, no insignificant whitespace, ASCII escaping,
-finite floats only, ``-0.0`` normalised to ``0.0`` and tuples serialised as lists.
-Two semantically identical specs therefore hash identically regardless of the key
-order or formatting of the request that produced them.
+Canonical JSON: UTF-8, sorted keys, no insignificant whitespace, ASCII escaping, finite floats
+only, ``-0.0`` folded into ``0.0``, tuples as lists. Every hash in QuantGrid is a lowercase hex
+SHA-256 of it, so changing these rules changes every recorded hash.
 """
 
 from __future__ import annotations
@@ -45,7 +41,6 @@ def _normalise(obj: Any, path: str) -> JsonValue:
 
 
 def canonical_json(obj: Any) -> str:
-    """Serialise ``obj`` to canonical JSON (see module docstring)."""
     return json.dumps(
         _normalise(obj, "$"),
         sort_keys=True,
@@ -56,14 +51,12 @@ def canonical_json(obj: Any) -> str:
 
 
 def sha256_hex(data: bytes | str) -> str:
-    """SHA-256 of raw bytes (``str`` is UTF-8 encoded first)."""
     if isinstance(data, str):
         data = data.encode("utf-8")
     return hashlib.sha256(data).hexdigest()
 
 
 def canonical_sha256(obj: Any) -> str:
-    """SHA-256 of the canonical JSON form of ``obj``."""
     return sha256_hex(canonical_json(obj))
 
 

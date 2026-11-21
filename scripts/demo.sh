@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
-# End-to-end demo against REAL processes and the HTTP API:
-#   144-job synthetic grid -> 4 workers -> kill one mid-run -> recovery -> verifier.
-#
-#   scripts/dev_services.sh start && eval "$(scripts/dev_services.sh env)"
-#   scripts/demo.sh            # writes a transcript to var/demo/transcript.txt
-#
-# Everything printed below is real output; nothing is canned.
+# End-to-end demo against real processes and the HTTP API: submit a 144-task grid to
+# 4 workers, SIGKILL one mid-run, wait for recovery, run the verifier.
+# Run: scripts/dev_services.sh start && eval "$(scripts/dev_services.sh env)"; scripts/demo.sh
+# Output: stdout and var/demo/transcript.txt (plus per-process logs in var/demo/).
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 PY=.venv/bin/python

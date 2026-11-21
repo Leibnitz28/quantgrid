@@ -16,13 +16,13 @@ router = APIRouter(tags=["meta"])
 
 @router.get("/healthz")
 def healthz() -> dict[str, str]:
-    """Liveness: the process is serving requests."""
+    """Liveness."""
     return {"status": "ok"}
 
 
 @router.get("/readyz")
 def readyz(ctx: Annotated[AppContext, Depends(get_ctx)]) -> JSONResponse:
-    """Readiness: PostgreSQL (and Redis, when configured) answer."""
+    """Readiness: PostgreSQL (and Redis, when configured) respond."""
     checks: dict[str, Any] = {}
     try:
         with ctx.engine.connect() as conn:

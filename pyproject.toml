@@ -1,9 +1,21 @@
 [project]
 name = "quantgrid"
 version = "0.1.0"
-description = "QuantGrid: fault-tolerant distributed scheduler for reproducible quant research backtests (offline, synthetic data; never live trading)."
+description = "Fault-tolerant scheduler for reproducible quant research backtests."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Piyush Jha" }]
+keywords = ["backtesting", "scheduler", "distributed-systems", "quant", "celery", "postgresql"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Typing :: Typed",
+]
+
 dependencies = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
@@ -31,6 +43,10 @@ llm = ["anthropic>=1.0"]
 # Optional OTLP span exporter (default exporter is "none"; "console" needs no extra).
 otlp = ["opentelemetry-exporter-otlp-proto-http>=1.25"]
 
+[project.urls]
+Repository = "https://github.com/Ankur17nith/quantgrid"
+Changelog = "https://github.com/Ankur17nith/quantgrid/blob/main/CHANGELOG.md"
+
 [project.scripts]
 quantgrid = "quantgrid.cli:main"
 
@@ -45,7 +61,7 @@ dev = [
 ]
 
 [build-system]
-requires = ["hatchling>=1.24"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
@@ -59,7 +75,7 @@ src = ["src", "tests", "scripts"]
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "S", "PT", "C4"]
 ignore = [
-    "S608",   # SQL built from fixed fragments only (bind params for values); reviewed in docs/CORRECTNESS.md
+    "S608",   # SQL is built from fixed fragments; all values are bound parameters
     "RUF012", # pydantic/sqlalchemy class attributes
     "PT018",  # composite assertions are fine in tests
 ]

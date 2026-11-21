@@ -1,9 +1,8 @@
-"""Task engine: contract, purity, faults, cancellation, dispatch, golden regression fixture.
+"""Task engine: contract, purity, faults, cancellation, dispatch, golden fixture.
 
-The golden fixture ``fixtures/golden/engine_golden.json`` pins the exact metrics (and a
-digest of every output series) of a few fixed task specs. Any numerical change to the
-generator, strategy, metrics or bootstrap fails :func:`test_golden_fixture` with an exact
-comparison. After an *intended* change, regenerate and review the diff:
+``fixtures/golden/engine_golden.json`` pins exact metrics and series digests of a few task
+specs, so any numerical change fails :func:`test_golden_fixture`. After an intended change,
+regenerate and review the diff:
 
     QG_REGEN_GOLDEN=1 .venv/bin/pytest tests/unit/test_engine.py -k golden
 """
@@ -116,11 +115,6 @@ def assert_same_output(a: TaskOutput, b: TaskOutput) -> None:
     assert dict(a.diagnostics) == dict(b.diagnostics)
 
 
-# --------------------------------------------------------------------------------------
-# Output contract and purity
-# --------------------------------------------------------------------------------------
-
-
 class TestContract:
     def test_output_shapes_types_and_keys(self, bars: dict[str, Bars]) -> None:
         out = run(make_spec(), bars["pairs-ou-small-v1"])
@@ -213,11 +207,6 @@ class TestBootstrapWorkload:
         for key in CORE_METRIC_KEYS:
             assert a.metrics[key] == b.metrics[key]
         assert a.metrics["sharpe_boot_mean"] != b.metrics["sharpe_boot_mean"]
-
-
-# --------------------------------------------------------------------------------------
-# Integrity, params, faults
-# --------------------------------------------------------------------------------------
 
 
 class TestIntegrityAndParams:
@@ -314,11 +303,6 @@ class TestFaultInjection:
             run(spec, bars["pairs-ou-small-v1"], cancel=DeadlineCancelToken(max_runtime_s=0.1))
 
 
-# --------------------------------------------------------------------------------------
-# Cancellation and deadlines
-# --------------------------------------------------------------------------------------
-
-
 class TestCancellation:
     def test_abort_mid_run_raises_task_aborted(self, bars: dict[str, Bars]) -> None:
         spec = make_spec("pairs-ou-medium-v1", workload=WorkloadSpec(bootstrap_samples=5000))
@@ -351,11 +335,6 @@ class TestCancellation:
         run(make_spec("pairs-ou-large-v1"), bars["pairs-ou-large-v1"], cancel=token)
         # 80,000 test bars: >= 79 rolling blocks + >= 19 position-loop checks
         assert token.checks >= 98
-
-
-# --------------------------------------------------------------------------------------
-# Engine registry
-# --------------------------------------------------------------------------------------
 
 
 class ToyParams(GenericScalarParams):
@@ -403,11 +382,6 @@ class TestRegistry:
             assert reg.fn is toy_engine
         finally:
             register_engine("pairs_zscore", "1", run_pairs_zscore_task, replace=True)
-
-
-# --------------------------------------------------------------------------------------
-# Golden regression fixture
-# --------------------------------------------------------------------------------------
 
 
 def golden_specs() -> list[tuple[str, TaskSpec]]:
@@ -548,8 +522,7 @@ def test_golden_fixture_covers_the_required_cases() -> None:
 def test_engine_rejects_bars_whose_content_does_not_match_their_claimed_signature(
     bars: dict[str, Bars],
 ) -> None:
-    """Review finding: a Bars object carrying the right sha256 label but tampered prices
-    (e.g. loaded with verify=False, or a corrupted in-process cache) must not be run."""
+    """Bars with the right sha256 label but tampered prices must not be run."""
     good = bars["pairs-ou-small-v1"]
     cx = good.close_x.copy()
     cx[1234] *= 1.01

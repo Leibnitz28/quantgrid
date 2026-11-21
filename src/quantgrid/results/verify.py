@@ -1,7 +1,6 @@
-"""Batch verifier: prove the final result table holds exactly one logical result per
-expected task, and that the scheduler's audit trail is consistent.
-
-Checks (``error`` severity fails the verification; ``warning`` is informational):
+"""Batch verifier: checks that the result table holds exactly one result per expected task
+and that the scheduler's audit trail is consistent. ``error`` findings fail verification,
+``warning`` ones are informational. Checks:
 
 1. batch_spec_integrity       stored batch spec re-hashes to ``batches.spec_sha``
 2. expected_task_set          re-expanding the stored spec yields exactly the stored
@@ -141,7 +140,7 @@ def verify_batch(
     for a in attempts:
         by_task_attempts[a["task_id"]].append(a)
 
-    # 1 + 2: spec integrity and expected task set ----------------------------------
+    # 1 + 2: spec integrity and expected task set
     spec = ExperimentBatchSpec.model_validate(batch["spec"])
     checks.append(
         Check(
@@ -172,7 +171,7 @@ def verify_batch(
         )
     )
 
-    # 3: completion ---------------------------------------------------------------
+    # 3: completion
     active = [t for t in tasks if t["state"] in ("PENDING", "RUNNING", "RETRY_PENDING")]
     checks.append(
         Check(
@@ -186,7 +185,7 @@ def verify_batch(
         )
     )
 
-    # 4: exactly one logical result per succeeded task -----------------------------
+    # 4: exactly one logical result per succeeded task
     problems: list[str] = []
     for t in tasks:
         n = len(by_task_results.get(t["id"], []))
@@ -216,7 +215,7 @@ def verify_batch(
         )
     )
 
-    # 5: artifacts verified -------------------------------------------------------
+    # 5: artifacts verified
     art_problems: list[str] = []
     if deep and results:
         from quantgrid.results.codec import validate_artifact
@@ -271,7 +270,7 @@ def verify_batch(
             )
         )
 
-    # 7: attempt log ----------------------------------------------------------------
+    # 7: attempt log
     att_problems: list[str] = []
     result_attempt = {r["task_id"]: r["attempt"] for r in results}
     for t in tasks:
@@ -299,7 +298,7 @@ def verify_batch(
         )
     )
 
-    # 8: transitions ------------------------------------------------------------------
+    # 8: transitions
     tr_problems: list[str] = []
     paths_by_task: dict[Any, list[dict[str, Any]]] = defaultdict(list)
     for tr in transitions:
@@ -334,7 +333,7 @@ def verify_batch(
         )
     )
 
-    # 9: retries never changed a result silently ---------------------------------------
+    # 9: retries never changed a result silently
     published_sha = {r["task_id"]: r["output_sha"] for r in results}
     mismatches = [
         f"task {a['task_id']} attempt {a['attempt']} ({a['status']}) produced "
@@ -356,7 +355,7 @@ def verify_batch(
         )
     )
 
-    # 10: orphans (global, informational) -----------------------------------------------
+    # 10: orphans (global, informational)
     if check_orphans and hasattr(store, "iter_artifacts"):
         referenced = {
             r["output_uri"]
@@ -374,7 +373,7 @@ def verify_batch(
             )
         )
 
-    # 11: recompute sample ----------------------------------------------------------------
+    # 11: recompute sample
     if recompute_sample > 0 and results:
         checks.append(_recompute(results, tasks, recompute_sample, data_dir))
 

@@ -1,8 +1,7 @@
 """Launch and control real local coordinator / worker / API processes.
 
-Used by the end-to-end tests, ``scripts/chaos_kill_worker.py`` and
-``scripts/benchmark.py``. Each process is a separate OS process (its own session), so
-tests can deliver real ``SIGKILL`` / ``SIGSTOP`` / ``SIGTERM`` signals to a worker.
+Used by the end-to-end tests and ``scripts/``. Each child has its own session so tests
+can send real ``SIGKILL`` / ``SIGSTOP`` / ``SIGTERM`` to a worker.
 """
 
 from __future__ import annotations
@@ -52,7 +51,7 @@ class ManagedProcess:
             os.kill(self.pid, sig)
 
     def kill(self) -> None:
-        """SIGKILL: no cleanup, no lease release - simulates a crashed worker/host."""
+        """SIGKILL: no cleanup or lease release, like a crashed host."""
         self.send(signal.SIGKILL)
         self.popen.wait(timeout=10)
         self._close_log()
@@ -60,7 +59,7 @@ class ManagedProcess:
     def stop(self, timeout: float = 30.0) -> int | None:
         """Graceful SIGTERM, escalating to SIGKILL after ``timeout`` seconds."""
         if self.alive():
-            self.send(signal.SIGCONT)  # in case it was paused
+            self.send(signal.SIGCONT)
             self.send(signal.SIGTERM)
             try:
                 self.popen.wait(timeout=timeout)
@@ -98,7 +97,6 @@ class LocalStack:
         self.env = {**os.environ, **CHILD_ENV_DEFAULTS, **(env or {})}
         self.processes: dict[str, ManagedProcess] = {}
 
-    # ------------------------------------------------------------------ launching
     def _spawn(
         self, name: str, argv: list[str], extra_env: Mapping[str, str] | None = None
     ) -> ManagedProcess:
@@ -149,7 +147,6 @@ class LocalStack:
     def workers(self) -> dict[str, ManagedProcess]:
         return {n: p for n, p in self.processes.items() if n not in ("coordinator", "api")}
 
-    # ------------------------------------------------------------------ waiting
     def wait_for_workers(
         self, engine: Engine, worker_ids: Iterable[str], *, timeout: float = 60.0
     ) -> None:
@@ -197,7 +194,6 @@ class LocalStack:
             time.sleep(poll_s)
         raise TimeoutError(f"batch {batch_id} still {state} after {timeout}s")
 
-    # ------------------------------------------------------------------ teardown
     def stop_all(self, timeout: float = 30.0) -> None:
         for name in sorted(self.processes, key=lambda n: n == "coordinator"):
             self.processes[name].stop(timeout)

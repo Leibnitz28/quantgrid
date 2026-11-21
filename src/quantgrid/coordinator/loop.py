@@ -95,7 +95,6 @@ class Coordinator:
         self.ticks = 0
         self.is_leader = False
 
-    # ------------------------------------------------------------------ one tick
     def tick(self) -> TickReport:
         t0 = time.monotonic()
         s = self.settings
@@ -181,7 +180,6 @@ class Coordinator:
         for state in ("PENDING", "RUNNING", "RETRY_PENDING", "SUCCEEDED", "FAILED", "CANCELED"):
             gauge.labels(state=state).set(counts.get(state, 0))
 
-    # ------------------------------------------------------------------ main loop
     def stop(self) -> None:
         self.stop_event.set()
 
@@ -233,7 +231,7 @@ class Coordinator:
         deadline = time.monotonic() + self.settings.coordinator_tick_s
         for _ in conn.notifies(timeout=self.settings.coordinator_tick_s, stop_after=1):
             break
-        # Coalesce bursts (many completions at once) into a single tick.
+        # Coalesce bursts into a single tick.
         remaining = max(0.0, min(0.01, deadline - time.monotonic()))
         for _ in conn.notifies(timeout=remaining):
             pass

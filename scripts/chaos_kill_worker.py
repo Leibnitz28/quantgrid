@@ -1,23 +1,18 @@
 #!/usr/bin/env python
-"""Chaos test: kill (or freeze) a worker mid-job and prove recovery without duplicates.
+"""Chaos test: kill or freeze a worker mid-batch and check the batch recovers without duplicates.
 
-Launches a coordinator + N workers as real processes, submits a parameter grid (default
-144 tasks), waits until the victim worker is running a task, then:
+Starts a coordinator and --workers worker processes, submits a 144-task grid, and once the
+victim worker is running a task:
+* --signal KILL: SIGKILL the worker.
+* --signal STOP: SIGSTOP it for --stop-seconds (default 2 x lease TTL), then SIGCONT.
 
-* ``--signal KILL``: SIGKILL the worker (crash: no cleanup, no lease release), or
-* ``--signal STOP``: SIGSTOP it for ``--stop-seconds`` (longer than the lease TTL), then
-  SIGCONT - the worker resumes as a "zombie" whose lease was reassigned.
+After the batch settles it prints recovery latencies (database clock) and the batch
+verifier summary, and writes a JSON report (--out, default benchmarks/results/).
+Exit code is 0 only if the verifier finds exactly one published result per task.
 
-Afterwards it waits for the batch to settle, measures recovery latency on the DATABASE
-clock (kill -> lease reclaimed -> next attempt started -> task published), prints the
-retry-count distribution, and runs the batch verifier. Exit code 0 only if the verifier
-proves exactly one published result per expected task.
-
-Example::
-
-    scripts/dev_services.sh start && eval "$(scripts/dev_services.sh env)"
-    .venv/bin/alembic upgrade head
-    .venv/bin/python scripts/chaos_kill_worker.py --workers 4 --signal KILL --restart
+Run: scripts/dev_services.sh start && eval "$(scripts/dev_services.sh env)"
+     .venv/bin/alembic upgrade head
+     .venv/bin/python scripts/chaos_kill_worker.py --workers 4 --signal KILL --restart
 """
 
 from __future__ import annotations
@@ -108,7 +103,9 @@ def running(engine: Engine, batch_id: uuid.UUID) -> list[tuple[str, str]]:
     return [(str(r.id), str(r.lease_owner)) for r in rows]
 
 
-def recovery_latencies(engine: Engine, victim: str, t_kill: datetime) -> list[dict[str, Any]]:
+def recovery_latencies(
+    engine: Engine, batch_id: uuid.UUID, victim: str, t_kill: datetime
+) -> list[dict[str, Any]]:
     """For each attempt the victim held at kill time: reclaim / restart / publish delays."""
     with engine.connect() as conn:
         rows = (
@@ -120,11 +117,11 @@ def recovery_latencies(engine: Engine, victim: str, t_kill: datetime) -> list[di
                 FROM task_attempts a
                 JOIN tasks t ON t.id = a.task_id
                 LEFT JOIN task_attempts n ON n.task_id = a.task_id AND n.attempt = a.attempt + 1
-                WHERE a.worker_id = :w AND a.status = 'LEASE_EXPIRED'
+                WHERE a.batch_id = :b AND a.worker_id = :w AND a.status = 'LEASE_EXPIRED'
                 ORDER BY a.ended_at
                 """
                 ),
-                {"w": victim},
+                {"b": batch_id, "w": victim},
             )
             .mappings()
             .all()
@@ -220,7 +217,7 @@ def main() -> int:
         if args.signal == "STOP":
             time.sleep(stop_seconds)
             proc.send(signal.SIGCONT)
-            print(f"[chaos] SIGCONT {victim} after {stop_seconds:.1f}s (zombie resumes)")
+            print(f"[chaos] SIGCONT {victim} after {stop_seconds:.1f}s (worker resumes)")
         if args.restart and args.signal == "KILL":
             stack.start_worker(f"{victim}-replacement")
             print(f"[chaos] started replacement worker {victim}-replacement")
@@ -229,9 +226,10 @@ def main() -> int:
             engine, batch_id, timeout=max(1.0, deadline - time.monotonic())
         )
         elapsed = time.monotonic() - t_submit
-        time.sleep(settings.heartbeat_interval_s * 2)  # let a resumed zombie record its late finish
+        # a resumed worker records its late finish
+        time.sleep(settings.heartbeat_interval_s * 2)
 
-    latencies = recovery_latencies(engine, victim, t_kill)
+    latencies = recovery_latencies(engine, batch_id, victim, t_kill)
     report = verify_batch(engine, LocalArtifactStore.from_settings(settings), batch_id)
     print(report.summary())
     for lat in latencies:

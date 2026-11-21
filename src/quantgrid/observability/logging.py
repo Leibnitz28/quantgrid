@@ -1,8 +1,8 @@
 """Structured logging: JSON/console formatters, redaction and contextvars binding.
 
-Invariants: every JSON record is a single line of valid JSON; values under keys that
-look secret (key/token/secret/password/authorization) are never emitted; context is
-held in :mod:`contextvars`, so it is isolated per thread and per asyncio task.
+Invariants: every JSON record is one line of valid JSON; values under secret-looking keys
+(key/token/secret/password/authorization) are never emitted; context lives in
+:mod:`contextvars`.
 """
 
 from __future__ import annotations
@@ -39,21 +39,18 @@ _RESERVED = frozenset(logging.LogRecord("", 0, "", 0, "", None, None).__dict__) 
 
 
 def get_context() -> dict[str, Any]:
-    """Return a copy of the currently bound context."""
+    """Copy of the bound context."""
     return dict(_current())
 
 
 def clear_context() -> None:
-    """Drop all bound context in the current execution context."""
+    """Drop all bound context."""
     _context.set({})
 
 
 @contextlib.contextmanager
 def bind_context(**kv: Any) -> Iterator[None]:
-    """Bind ``kv`` for the duration of the block; nests and restores on exit.
-
-    ``None`` values are ignored so callers can pass optional ids unconditionally.
-    """
+    """Bind ``kv`` for the block (nests; ``None`` values are ignored)."""
     merged = {**_current(), **{k: v for k, v in kv.items() if v is not None}}
     token = _context.set(merged)
     try:
@@ -63,7 +60,7 @@ def bind_context(**kv: Any) -> Iterator[None]:
 
 
 def context_to_dict() -> dict[str, str]:
-    """Serialise the bound context to a plain str->str dict (e.g. Celery headers)."""
+    """Bound context as a str->str dict (e.g. Celery headers)."""
     return {k: str(v) for k, v in _current().items()}
 
 
@@ -80,7 +77,7 @@ def _is_secret_key(key: object) -> bool:
 
 
 def redact(value: Any, _depth: int = 0) -> Any:
-    """Recursively redact values of secret-looking keys and make ``value`` JSON-safe."""
+    """Redact secret-looking keys and make ``value`` JSON-safe."""
     if _depth > _MAX_DEPTH:
         return str(value)
     if isinstance(value, Mapping):
@@ -104,7 +101,7 @@ def _trace_fields() -> dict[str, str]:
         from opentelemetry import trace
 
         ctx = trace.get_current_span().get_span_context()
-    except Exception:  # pragma: no cover - defensive
+    except Exception:  # pragma: no cover
         return {}
     if not ctx.is_valid:
         return {}
@@ -152,7 +149,7 @@ class JsonFormatter(logging.Formatter):
 
 
 class ConsoleFormatter(logging.Formatter):
-    """Human-readable single-line format with ``key=value`` context."""
+    """Single-line ``key=value`` format."""
 
     def __init__(self, service: str = "quantgrid") -> None:
         super().__init__()
@@ -179,8 +176,7 @@ def configure_logging(
     fmt: Literal["json", "console"] = "json",
     service: str = "quantgrid",
 ) -> None:
-    """Route the root logger to stderr with the chosen formatter. Idempotent: calling
-    again replaces the handler we installed earlier rather than adding another."""
+    """Route the root logger to stderr; idempotent (replaces its own earlier handler)."""
     root = logging.getLogger()
     for h in list(root.handlers):
         if getattr(h, _HANDLER_ATTR, False):

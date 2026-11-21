@@ -1,9 +1,8 @@
 """Quota and policy service: deterministic admission control for experiment batches.
 
-Every batch - whether hand-written or proposed by the AI planner - must pass
-:meth:`PolicyService.evaluate` before anything is persisted or enqueued. The planner can
-*call* this check through a read-only tool, but cannot bypass it: the API runs it again
-on submission. Nothing here depends on an LLM.
+Every batch, hand-written or proposed by the planner, must pass ``PolicyService.evaluate``
+before anything is persisted or enqueued. The planner can call it through a read-only tool
+but cannot bypass it, because the API runs it again on submission. Nothing here uses an LLM.
 """
 
 from __future__ import annotations
@@ -63,15 +62,13 @@ TEST_BARS_PER_LOOKBACK = 2  # test segment must hold at least 2x the longest loo
 
 
 class DatasetCatalog(Protocol):
-    """Read-only registry of datasets the platform may run on."""
-
     def get(self, name: str) -> DatasetInfo | None: ...
 
     def list(self) -> Sequence[DatasetInfo]: ...
 
 
 class QuotaPolicy(BaseModel):
-    """Per-user limits. A snapshot is stored on every batch row (``batches.quota``)."""
+    """Per-user limits; a snapshot is stored on each batch row."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -111,12 +108,7 @@ class Violation(BaseModel):
 
 @dataclass(frozen=True)
 class CostModel:
-    """Rough, documented per-task cost model used for admission and planning.
-
-    Constants are conservative upper-bound style estimates for the built-in engine on a
-    ~2 GHz x86 core; ``benchmarks/`` documents how they were checked. They only drive
-    *estimates*; hard limits are the declared budgets.
-    """
+    """Rough per-task cost estimates for admission and planning (not hard limits)."""
 
     overhead_s: float = 0.05
     seconds_per_bar: float = 2.0e-6
@@ -163,15 +155,12 @@ class PolicyDecision(BaseModel):
     estimate: CostEstimate | None = None
 
     def error_type(self) -> Literal["QUOTA_EXCEEDED", "VALIDATION_ERROR"]:
-        """API error type for a rejected decision."""
         codes = {v.code for v in self.violations}
         return "QUOTA_EXCEEDED" if codes and codes <= QUOTA_VIOLATIONS else "VALIDATION_ERROR"
 
 
 @dataclass(frozen=True)
 class AdmittedBatch:
-    """A spec that passed policy, with its deterministic task expansion."""
-
     spec: ExperimentBatchSpec
     tasks: list[ExpandedTask]
     decision: PolicyDecision
@@ -194,11 +183,10 @@ def _max_lookback(spec: ExperimentBatchSpec) -> int:
 
 
 def estimate_split(spec: ExperimentBatchSpec, ds: DatasetInfo) -> tuple[int, int, list[str]]:
-    """Approximate (n_train, n_test) bars and protocol problems for admission.
+    """Approximate (n_train, n_test) bars and protocol problems.
 
-    Exact indices are resolved by the engine against the recorded timestamps; datasets
-    with gaps can differ slightly, in which case the engine raises a non-retryable
-    ``SPEC_ERROR`` at execution time.
+    Gappy datasets can differ slightly from the engine's exact split, which then raises a
+    non-retryable ``SPEC_ERROR``.
     """
     problems: list[str] = []
     n = ds.n_bars
@@ -251,7 +239,6 @@ class PolicyService:
         *,
         active_batches: int = 0,
     ) -> PolicyDecision:
-        """Check ``spec`` against ``quota`` and the research protocol (no side effects)."""
         violations: list[Violation] = []
         warnings: list[str] = []
         task_count = spec.task_count()
@@ -389,7 +376,6 @@ class PolicyService:
         *,
         active_batches: int = 0,
     ) -> tuple[PolicyDecision, AdmittedBatch | None]:
-        """Evaluate and, if allowed, return the expanded immutable task specs."""
         decision = self.evaluate(spec, quota, active_batches=active_batches)
         if not decision.allowed:
             return decision, None

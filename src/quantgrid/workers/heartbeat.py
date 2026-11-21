@@ -168,7 +168,7 @@ class HeartbeatThread(threading.Thread):
 
 
 def _inc(metric: str, **labels: str) -> None:
-    """Increment a metric from quantgrid.observability.metrics if it exists."""
+    """Increment a metric if the observability package provides it."""
     try:
         from quantgrid.observability import metrics
     except ImportError:  # pragma: no cover

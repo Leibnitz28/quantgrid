@@ -156,7 +156,7 @@ def test_schema_validation_errors_use_envelope(
     err = r.json()["error"]
     assert err["type"] == "VALIDATION_ERROR"
     assert any(fragment in ".".join(d["loc"]) for d in err["details"])
-    assert "input" not in str(err["details"][0]).lower() or True  # inputs are never echoed
+    assert all("input" not in d for d in err["details"])  # request values are never echoed
 
 
 def test_policy_rejections(client: TestClient) -> None:
@@ -301,9 +301,6 @@ def test_request_id_propagation_and_health(client: TestClient) -> None:
     assert (
         client.get("/v1/nope", headers={"X-API-Key": KEY_A}).json()["error"]["type"] == "NOT_FOUND"
     )
-
-
-# ---------------------------------------------------------------- AI endpoints (FakeLLM)
 
 
 @pytest.fixture

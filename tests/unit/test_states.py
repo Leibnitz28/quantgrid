@@ -120,9 +120,6 @@ def test_batch_terminal_states() -> None:
     assert BATCH_TRANSITIONS[B.CANCELING] == {B.CANCELED}
 
 
-# ---- derive_batch_state examples ------------------------------------------------------
-
-
 def test_all_succeeded_completes() -> None:
     assert derive_batch_state(B.RUNNING, {T.SUCCEEDED: 5}, cancel_requested=False) is B.COMPLETED
 

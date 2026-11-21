@@ -1,4 +1,4 @@
-# ADR 0006 — Deterministic engine, hashed specs and reproducibility manifests
+# ADR 0006: Deterministic engine, hashed specs and reproducibility manifests
 
 **Status:** accepted
 

@@ -1,4 +1,4 @@
-"""Skeptical unit tests for the experiment spec contracts."""
+"""Unit tests for the experiment spec contracts."""
 
 from __future__ import annotations
 
@@ -61,9 +61,6 @@ def ts_split(**over: Any) -> dict[str, Any]:
     return base
 
 
-# ---- extra fields rejected at every nesting level -------------------------------------
-
-
 @pytest.mark.parametrize(
     "path",
     [
@@ -123,9 +120,6 @@ def test_dataset_sha_validated(bad: str) -> None:
 def test_identifier_validated(bad: str) -> None:
     with pytest.raises(ValidationError):
         DatasetRef(name=bad, sha256=SHA)
-
-
-# ---- SplitSpec ------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -213,9 +207,6 @@ def test_train_fraction_bounds(frac: float) -> None:
 def test_embargo_bounds(emb: int) -> None:
     with pytest.raises(ValidationError):
         SplitSpec(embargo_bars=emb)
-
-
-# ---- grid / seeds limits --------------------------------------------------------------
 
 
 def test_grid_dimension_limit() -> None:
@@ -326,9 +317,6 @@ def test_fault_injection_tuple_serialises_as_list() -> None:
     assert f.model_dump(mode="json")["fail_on_attempts"] == [1, 2]
 
 
-# ---- task_count / expansion limits ----------------------------------------------------
-
-
 def test_task_count_without_expansion() -> None:
     spec = make_spec(
         grid={"lookback": [20, 30, 40], "entry_z": [2.0, 3.0]},
@@ -362,9 +350,6 @@ def test_max_tasks_boundary() -> None:
     with pytest.raises(GridExpansionError):
         expand_grid(spec, max_tasks=19)
     assert ABSOLUTE_MAX_TASKS == 100_000
-
-
-# ---- expansion ordering, ordinals, duplicates ------------------------------------------
 
 
 def test_deterministic_order_and_ordinals() -> None:
@@ -479,9 +464,6 @@ def test_fractional_lookback_rejected() -> None:
         expand_grid(make_spec(grid={"lookback": [20.5]}))
 
 
-# ---- normalisation / hashing ----------------------------------------------------------
-
-
 def test_int_float_str_normalisation_same_hash() -> None:
     hashes = set()
     for lookback in (20, "20", 20.0):
@@ -561,9 +543,6 @@ def test_seed_order_matters_to_batch_sha_not_task_hashes() -> None:
     assert {t.spec_hash for t in expand_grid(a)} == {t.spec_hash for t in expand_grid(b)}
 
 
-# ---- strategy registry ----------------------------------------------------------------
-
-
 @pytest.fixture
 def restore_registry() -> Any:
     saved = dict(specs_mod._STRATEGY_PARAMS)
@@ -618,9 +597,6 @@ def test_generic_params_reject_nested_values() -> None:
         GenericScalarParams.model_validate({"a": float("nan")})
     with pytest.raises(ValidationError):
         GenericScalarParams.model_validate([1])
-
-
-# ---- DatasetInfo ----------------------------------------------------------------------
 
 
 def test_dataset_info_validation() -> None:

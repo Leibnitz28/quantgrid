@@ -1,8 +1,8 @@
 """End-to-end: real coordinator + Celery worker processes + Redis + PostgreSQL.
 
-Failure injection uses real signals: SIGKILL (crash) and SIGSTOP/SIGCONT (a stalled
-"zombie" that resumes after its lease was reassigned). Every scenario ends with the
-batch verifier, which must prove exactly one logical result per expected task.
+Failures are injected with real signals: SIGKILL (crash) and SIGSTOP/SIGCONT (a stalled
+worker that resumes after its lease was reassigned). Each scenario ends with the batch
+verifier, which must find exactly one result per task.
 """
 
 from __future__ import annotations
@@ -146,9 +146,6 @@ def wait_until(predicate: Any, timeout: float, what: str) -> Any:
     raise TimeoutError(f"timed out waiting for {what}")
 
 
-# ======================================================================================
-
-
 def test_happy_path_120_tasks_one_result_each(
     stack: LocalStack, clean_db: Engine, stack_env: dict[str, str]
 ) -> None:
@@ -205,10 +202,8 @@ def test_sigstop_zombie_cannot_publish_after_reassignment(
         proc.send(signal.SIGCONT)
     assert stack.wait_for_batch(clean_db, bid, timeout=240) == "COMPLETED"
 
-    # The resumed worker must not publish. Two safe outcomes exist: usually its heartbeat
-    # thread learns first that the lease was reclaimed and the task aborts cooperatively;
-    # if the compute thread reaches publish first, the fenced finalize rejects it and only
-    # records its checksum (covered deterministically in test_repository.py).
+    # The resumed worker must not publish: either the heartbeat thread aborts the task, or
+    # the fenced finalize rejects it and only records the checksum (see test_repository.py).
     def zombie_settled() -> bool:
         late = any(
             a["late_completion_at"] for a in repo.get_task_detail(clean_db, task_id)["attempts"]

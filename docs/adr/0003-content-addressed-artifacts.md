@@ -1,4 +1,4 @@
-# ADR 0003 — Content-addressed artifacts with staged commit; publication is a DB row
+# ADR 0003: Content-addressed artifacts with staged commit; publication is a DB row
 
 **Status:** accepted
 

@@ -1,31 +1,15 @@
 """Deterministic Parquet encoding of one task result (result schema v1).
 
-An artifact is one Parquet file:
+Layout: ``ts`` first as ``timestamp[ns, tz=UTC]``, then the other ``TaskOutput.series`` keys
+sorted. Columns are required (no nulls); NaN is allowed in floats. NaN and ``-0.0`` are
+canonicalised so equal results encode identically. Footer metadata holds exactly these keys,
+in this order: ``quantgrid.diagnostics``, ``quantgrid.engine_version``, ``quantgrid.metrics``,
+``quantgrid.result_schema_version``, ``quantgrid.spec_hash``.
 
-* Columns: ``ts`` first, as ``timestamp[ns, tz=UTC]``, then every other
-  ``TaskOutput.series`` key in sorted order. Float columns are float64, integer
-  columns int64 and boolean columns bool. Every column is REQUIRED (no nulls). NaN is
-  allowed in float columns (e.g. indicator warm-up). Float values are canonicalised:
-  every NaN becomes the single quiet-NaN bit pattern and ``-0.0`` becomes ``0.0``, so
-  semantically identical results encode identically.
-* Footer key-value metadata: exactly these keys, written in this order:
-
-  - ``quantgrid.diagnostics``: canonical JSON object of scalar diagnostics
-  - ``quantgrid.engine_version``: caller-supplied engine identifier
-  - ``quantgrid.metrics``: canonical JSON object; each value is a finite number or null
-  - ``quantgrid.result_schema_version``: ``"1"``
-  - ``quantgrid.spec_hash``: SHA-256 of the task spec
-
-Determinism contract: the bytes are a pure function of ``(spec_hash, output,
-engine_version)`` and the Parquet library version. The library version appears in the
-footer's ``created_by`` and is covered by ``env_sha``. Nothing tied to a time, host,
-process or attempt is embedded: no task_id, batch_id, wall-clock time, hostname or
-Arrow schema blob. Writer options are fixed: format version, compression and level,
-no dictionary encoding, row-group and page sizes, page version, statistics on, no page
-index or checksums. So the same task spec yields byte-identical artifacts, and therefore
-the same content address, on every attempt and every worker running the same code and
-environment. ``engine_version`` must follow the same rule: derive it from the code
-version, never from a time or host.
+The bytes must be a pure function of ``(spec_hash, output, engine_version)`` and the Parquet
+library version (covered by ``env_sha``). Embed nothing tied to time, host, process or
+attempt, keep writer options fixed, and derive ``engine_version`` from the code version only,
+or the same spec stops producing the same content address.
 """
 
 from __future__ import annotations
@@ -93,9 +77,7 @@ DiagnosticValue = float | int | str | bool | None
 
 @dataclass(frozen=True, slots=True)
 class EncodedResult:
-    """Encoded artifact bytes plus the normalised metrics to store in
-    ``result_artifacts.metrics``. Metric keys are sorted, values are plain ``int``,
-    finite ``float`` or ``None``."""
+    """Artifact bytes plus the normalised metrics stored in ``result_artifacts.metrics``."""
 
     data: bytes
     row_count: int
@@ -103,14 +85,11 @@ class EncodedResult:
 
     @property
     def sha256(self) -> str:
-        """Content address of :attr:`data` (what the artifact store will compute)."""
         return sha256_hex(self.data)
 
 
 @dataclass(frozen=True, slots=True)
 class DecodedResult:
-    """A decoded artifact. ``table`` keeps the file's column order and types."""
-
     spec_hash: str
     metrics: dict[str, MetricValue]
     diagnostics: dict[str, DiagnosticValue]
@@ -123,7 +102,6 @@ class DecodedResult:
         return int(self.table.num_rows)
 
     def series(self) -> dict[str, npt.NDArray[np.generic]]:
-        """Columns as numpy arrays (``ts`` as int64 nanoseconds since the epoch, UTC)."""
         out: dict[str, npt.NDArray[np.generic]] = {}
         for name in self.table.column_names:
             column = self.table.column(name)
@@ -133,19 +111,8 @@ class DecodedResult:
         return out
 
 
-# --------------------------------------------------------------------------------------
-# Encoding
-# --------------------------------------------------------------------------------------
-
-
 def encode_result(spec_hash: str, output: TaskOutput, *, engine_version: str) -> EncodedResult:
-    """Encode ``output`` as a deterministic Parquet artifact (see module docstring).
-
-    Raises ``ValueError`` on invalid input: a malformed ``spec_hash`` or
-    ``engine_version``; series that are missing ``ts``, not 1-D numpy arrays, of unequal
-    length or of an unsupported dtype; bad column or metric names; metric values that
-    are not a finite number or ``None``; diagnostics that are not finite scalars.
-    """
+    """Encode ``output`` as a deterministic Parquet artifact; ``ValueError`` on bad input."""
     if not isinstance(output, TaskOutput):
         raise TypeError(f"expected TaskOutput, got {type(output).__name__}")
     if not is_sha256_hex(spec_hash):
@@ -186,11 +153,9 @@ def encode_result(spec_hash: str, output: TaskOutput, *, engine_version: str) ->
 
 
 def normalise_metrics(metrics: Mapping[str, Any]) -> dict[str, MetricValue]:
-    """Validate metrics and return them with sorted keys and plain Python values.
+    """Validate metrics; return sorted keys and plain Python values (``-0.0`` becomes ``0.0``).
 
-    Each value must be ``None``, an ``int`` within int64 or a finite ``float``. numpy
-    scalars are converted to Python numbers. Booleans, NaN and +-inf are rejected with
-    ``ValueError``. ``-0.0`` becomes ``0.0``.
+    Values must be ``None``, an int within int64 or a finite float; else ``ValueError``.
     """
     if not isinstance(metrics, Mapping):
         raise ValueError(f"metrics must be a mapping, got {type(metrics).__name__}")
@@ -314,18 +279,12 @@ def _as_int64(name: str, values: npt.NDArray[Any]) -> npt.NDArray[np.int64]:
     return values.astype(np.int64, copy=False)
 
 
-# --------------------------------------------------------------------------------------
-# Decoding and validation
-# --------------------------------------------------------------------------------------
-
-
 def _reject_constant(token: str) -> Any:
     raise ValueError(f"non-finite JSON number {token}")
 
 
 def _read_parquet(data: bytes) -> tuple[pa.Table, dict[str, str]]:
-    """Parse artifact bytes. Raises ``ValueError`` if they are not a readable Parquet file
-    with UTF-8 key-value metadata."""
+    """Parse artifact bytes; raises ``ValueError`` unless they are Parquet with UTF-8 metadata."""
     if not isinstance(data, bytes | bytearray | memoryview):
         raise ValueError(f"artifact data must be bytes, got {type(data).__name__}")
     try:
@@ -360,12 +319,9 @@ def _parse_diagnostics(text: str) -> dict[str, DiagnosticValue]:
 
 
 def decode_result(data: bytes) -> DecodedResult:
-    """Decode an artifact produced by :func:`encode_result`.
+    """Decode an artifact from :func:`encode_result`; raises ``ValueError`` on bad structure.
 
-    Strict about structure: required metadata present, metrics finite-or-null numbers,
-    diagnostics flat scalars, integer schema version. Raises ``ValueError`` otherwise.
-    It does not reject other schema versions or a ``spec_hash`` the caller did not
-    expect. :func:`validate_artifact` does those checks.
+    Schema version and expected ``spec_hash`` are checked by :func:`validate_artifact`.
     """
     table, metadata = _read_parquet(data)
     missing = [key for key in METADATA_KEYS if key not in metadata]
@@ -394,15 +350,10 @@ def validate_artifact(
     expected_spec_hash: str,
     expected_metrics: Mapping[str, MetricValue] | None = None,
 ) -> list[str]:
-    """Check that ``data`` is a well-formed v1 artifact for ``expected_spec_hash``.
+    """Problems found in ``data`` as a v1 artifact for ``expected_spec_hash`` (empty = OK).
 
-    Returns a list of human-readable problems. An empty list means the artifact is OK.
-    It never raises for bad *data*. It raises ``ValueError`` only for a malformed
-    ``expected_spec_hash`` argument. If ``expected_metrics`` is given (for example
-    ``result_artifacts.metrics`` read back from PostgreSQL), the embedded metrics must
-    have the same keys and numerically equal values. They are compared by value, not
-    text, because JSONB re-renders numbers: the float ``1e+16`` comes back as the
-    integer ``10000000000000000``.
+    Raises ``ValueError`` only for a malformed ``expected_spec_hash``. ``expected_metrics`` is
+    compared by value, not text, because JSONB re-renders numbers (``1e+16`` comes back as an int).
     """
     if not is_sha256_hex(expected_spec_hash):
         raise ValueError(f"expected_spec_hash must be a SHA-256 hex digest: {expected_spec_hash!r}")

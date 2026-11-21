@@ -27,7 +27,7 @@ class AppContext:
     redis_url: str | None = None
 
     def quota_for(self, user_id: str) -> QuotaPolicy:
-        """Per-user quota. MVP: one deployment-wide policy from settings."""
+        """One deployment-wide per-user quota from settings."""
         return QuotaPolicy.from_settings(self.settings)
 
 
